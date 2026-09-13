@@ -5,6 +5,25 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 4 — Outbox robusta e filas lógicas (`dz23_whatsapp` 19.0.11.0.0, `dz23_agent` 19.0.3.0.0)
+- **Erros de provedor tipados** (ADR-008): transitório (rede, 408/425/429/5xx e códigos
+  de rate limit Meta/Twilio) volta para retry com piso de `Retry-After`; permanente
+  (demais 4xx, canal sem credencial, número inválido) vai **direto para a DLQ**.
+- **429 pausa o canal** (`rate_limited_until`): nenhum item daquele canal é enviado até
+  o fim da janela; **limite de itens por canal** por execução do worker
+  (`dz23.whatsapp.outbox_per_channel_batch`, padrão 10).
+- **DLQ com motivo** (`permanent_error`, `max_attempts`, `lease_expired`) em inbox e
+  outbox; reenfileirar limpa o motivo.
+- **Correlação ponta a ponta**: a outbox envia `correlation_id` (Meta
+  `biz_opaque_callback_data`); callback de status com esse id **reconcilia ack
+  perdido** (grava o id do provedor e evita reenvio).
+- **Fila `status_event`**: evento persistido que falhar ao aplicar fica pendente e é
+  reaplicado por cron (5 min).
+- **Fila `ai_request`** (`dz23.ai.request`): a conversa livre com a IA saiu do item da
+  inbox; worker com claim/lease, até 3 tentativas e **fallback determinístico** no
+  fim; registra provedor, modelo, versão do prompt e duração. IA externa sem
+  consentimento responde o fallback na hora. Tela "Fila de IA".
+
 ### Fase 3 — Idempotência de efeitos de negócio (`dz23_whatsapp` 19.0.10.0.0, `dz23_agent` 19.0.2.0.0)
 - **Novo** `dz23.business.action` (ADR-005): efeito executa uma vez por
   `idempotency_key`; retry/mensagem repetida/worker concorrente devolvem o mesmo

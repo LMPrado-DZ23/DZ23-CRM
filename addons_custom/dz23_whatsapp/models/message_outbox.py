@@ -14,6 +14,7 @@ from odoo import api, fields, models
 from odoo.tools.translate import _
 
 from .message_event import MESSAGE_STATUSES, STATUS_RANK
+from .provider_errors import ProviderError, ProviderTransientError
 from .queue_utils import (
     backoff_seconds,
     can_commit,
@@ -34,6 +35,13 @@ _MARKER_FIELDS = {
     "read": "read_at",
 }
 _FAILURE_STATUSES = ("failed", "undelivered", "expired", "cancelled")
+_DEFAULT_PER_CHANNEL_BATCH = 10
+_RATE_LIMIT_FLOOR_SECONDS = 60
+DLQ_REASONS = [
+    ("permanent_error", "Erro permanente do provedor"),
+    ("max_attempts", "Tentativas esgotadas"),
+    ("lease_expired", "Lease expirado"),
+]
 
 
 def _extract_provider_message_id(data):
@@ -76,6 +84,7 @@ class DZ23MessageOutbox(models.Model):
     lease_until = fields.Datetime(index=True, readonly=True)
     duration_ms = fields.Integer(readonly=True, help="Duração da última tentativa de envio.")
     error = fields.Char()
+    dlq_reason = fields.Selection(DLQ_REASONS, readonly=True, index=True)
     provider_message_id = fields.Char(
         readonly=True, index=True, help="Id da mensagem confirmado pelo provedor."
     )
@@ -118,13 +127,26 @@ class DZ23MessageOutbox(models.Model):
     @api.model
     def _cron_process(self, limit=_BATCH):
         """Recupera leases vencidos, reivindica itens devidos e envia um a um."""
-        self.flush_model()  # o claim é SQL: grava antes o que está pendente no ORM
+        self.env.flush_all()  # o claim é SQL: grava antes o que está pendente no ORM
         self._recover_expired_leases()
         # A recuperação escreve via ORM: grava ANTES do UPDATE do claim, senão o
         # flush tardio sobrescreveria o estado 'sending' do claim.
-        self.flush_model()
+        self.env.flush_all()
+        per_channel = int(
+            self.env["ir.config_parameter"]
+            .sudo()
+            .get_param("dz23.whatsapp.outbox_per_channel_batch", _DEFAULT_PER_CHANNEL_BATCH)
+            or _DEFAULT_PER_CHANNEL_BATCH
+        )
         ids = claim_due(
-            self.env.cr, self._table, ("pending", "failed"), "sending", _LEASE_SECONDS, limit
+            self.env.cr,
+            self._table,
+            ("pending", "failed"),
+            "sending",
+            _LEASE_SECONDS,
+            limit,
+            per_channel_limit=max(1, per_channel),
+            skip_rate_limited=True,
         )
         if not ids:
             return
@@ -160,6 +182,7 @@ class DZ23MessageOutbox(models.Model):
                 rec.write(
                     {
                         "status": "dead",
+                        "dlq_reason": "lease_expired",
                         "lease_until": False,
                         "error": _("DLQ: lease expirado após %s tentativas") % rec.attempts,
                     }
@@ -201,14 +224,21 @@ class DZ23MessageOutbox(models.Model):
         started = time.monotonic()
         try:
             with self.env.cr.savepoint():
-                data = self.channel_id._processing_self().send_text(self.recipient, self.body)
+                data = self.channel_id._processing_self().send_text(
+                    self.recipient, self.body, correlation_id=self.correlation_id
+                )
             now = fields.Datetime.now()
             self.write(
                 {
                     "status": "sent",
                     "error": False,
+                    "dlq_reason": False,
                     "lease_until": False,
                     "provider_message_id": _extract_provider_message_id(data),
+                    # Só a Meta devolve o correlation_id nos callbacks de status.
+                    "client_message_id": (
+                        self.correlation_id if self.channel_id.provider == "meta_cloud" else False
+                    ),
                     "duration_ms": int((time.monotonic() - started) * 1000),
                 }
             )
@@ -217,26 +247,59 @@ class DZ23MessageOutbox(models.Model):
             self._register_failure(e, started)
 
     def _register_failure(self, exc, started):
+        """Erro permanente => DLQ imediata; transitório => retry com backoff
+        (piso = Retry-After); 429 pausa o canal inteiro (ADR-008)."""
+        now = fields.Datetime.now()
+        permanent = isinstance(exc, ProviderError) and exc.permanent
+        code = getattr(exc, "code", None) or getattr(exc, "status", None)
         vals = {
             "lease_until": False,
             "duration_ms": int((time.monotonic() - started) * 1000),
         }
-        if self.attempts >= self.max_attempts:
-            vals.update({"status": "dead", "error": _("DLQ: %s") % sanitize_error(exc)})
+        if permanent or self.attempts >= self.max_attempts:
+            reason = "permanent_error" if permanent else "max_attempts"
+            vals.update(
+                {
+                    "status": "dead",
+                    "dlq_reason": reason,
+                    "error": _("DLQ (%(reason)s): %(error)s")
+                    % {"reason": reason, "error": sanitize_error(exc)},
+                }
+            )
             self.write(vals)
-            self._apply_status("failed", error_message=vals["error"])
-            _logger.warning("Outbox %s -> DLQ após %s tentativas.", self.id, self.attempts)
+            self._apply_status("failed", error_code=code, error_message=vals["error"])
+            _logger.warning(
+                "Outbox %s -> DLQ (%s) após %s tentativa(s).", self.id, reason, self.attempts
+            )
             return
+        retry_after = getattr(exc, "retry_after", None) or 0
+        delay = max(backoff_seconds(self.attempts), retry_after)
         vals.update(
             {
                 "status": "failed",
                 "error": sanitize_error("%s: %s" % (type(exc).__name__, exc)),
-                "next_attempt_at": fields.Datetime.add(
-                    fields.Datetime.now(), seconds=backoff_seconds(self.attempts)
-                ),
+                "next_attempt_at": fields.Datetime.add(now, seconds=delay),
             }
         )
         self.write(vals)
+        if isinstance(exc, ProviderTransientError) and exc.status == 429:
+            pause = max(retry_after, _RATE_LIMIT_FLOOR_SECONDS)
+            self.channel_id.sudo().write(
+                {"rate_limited_until": fields.Datetime.add(now, seconds=pause)}
+            )
+            _logger.warning("Canal %s pausado %ss por rate limit (429).", self.channel_id.id, pause)
+
+    def _reconcile_provider_id(self, provider_message_id):
+        """Ack perdido: o callback do provedor (id + correlation_id) prova o envio,
+        então o item não é reenviado (ADR-008 §4)."""
+        self.ensure_one()
+        vals = {"provider_message_id": provider_message_id}
+        if self.status in ("pending", "failed", "sending", "dead"):
+            vals.update(
+                {"status": "sent", "lease_until": False, "error": False, "dlq_reason": False}
+            )
+        self.write(vals)
+        _logger.info("Outbox %s reconciliado pelo callback do provedor.", self.id)
 
     # ---------- ciclo de vida (ADR-006) ----------
     def _apply_status(self, status, occurred_at=None, error_code=None, error_message=None):
@@ -289,6 +352,7 @@ class DZ23MessageOutbox(models.Model):
                     "next_attempt_at": fields.Datetime.now(),
                     "lease_until": False,
                     "error": False,
+                    "dlq_reason": False,
                 }
             )
         return True

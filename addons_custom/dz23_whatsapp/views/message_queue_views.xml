@@ -16,6 +16,7 @@
                 <field name="provider"/>
                 <field name="sender"/>
                 <field name="status"/>
+                <field name="dlq_reason" optional="show"/>
                 <field name="attempts"/>
                 <field name="received_at"/>
                 <field name="next_attempt_at"/>
@@ -51,6 +52,7 @@
                         <group>
                             <field name="attempts"/>
                             <field name="max_attempts"/>
+                            <field name="dlq_reason"/>
                             <field name="received_at"/>
                             <field name="processed_at"/>
                             <field name="next_attempt_at"/>
@@ -113,6 +115,7 @@
                 <field name="channel_id"/>
                 <field name="recipient"/>
                 <field name="status"/>
+                <field name="dlq_reason" optional="show"/>
                 <field name="current_status"/>
                 <field name="attempts"/>
                 <field name="last_status_at"/>
@@ -142,6 +145,7 @@
                             <field name="channel_id"/>
                             <field name="recipient"/>
                             <field name="status"/>
+                            <field name="dlq_reason"/>
                             <field name="attempts"/>
                             <field name="max_attempts"/>
                             <field name="next_attempt_at"/>

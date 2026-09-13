@@ -11,6 +11,11 @@ from odoo import api, fields, models
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.translate import _
 
+from .provider_errors import (
+    ProviderPermanentError,
+    ProviderTransientError,
+    classify_http_error,
+)
 from .provider_normalizers import validate_event
 
 _logger = logging.getLogger(__name__)
@@ -146,6 +151,12 @@ class DZ23Channel(models.Model):
     )
     connection_state_at = fields.Datetime("Estado atualizado em", readonly=True)
     last_webhook_at = fields.Datetime("Último webhook recebido", readonly=True)
+    rate_limited_until = fields.Datetime(
+        "Envio pausado até",
+        readonly=True,
+        help="Preenchido quando o provedor responde 429: a outbox não envia por este "
+        "canal até esse horário (respeita Retry-After).",
+    )
     public_webhook_url = fields.Char(
         "URL do webhook (provedor)",
         compute="_compute_public_webhook_url",
@@ -353,9 +364,9 @@ class DZ23Channel(models.Model):
         self.ensure_one()
         to = _e164_br(number)
         if not to:
-            raise UserError(_("Número de WhatsApp inválido."))
+            raise ProviderPermanentError(_("Número de WhatsApp inválido."))
         if not body:
-            raise UserError(_("Mensagem vazia."))
+            raise ProviderPermanentError(_("Mensagem vazia."))
         # Credenciais do canal são restritas a admin (groups=group_system); o
         # envio roda como usuário técnico (bot) — por isso lê via sudo() aqui.
         channel = self.sudo()
@@ -366,14 +377,31 @@ class DZ23Channel(models.Model):
         }[channel.provider](to, body, correlation_id=correlation_id)
 
     def _post(self, url, **kwargs):
+        """POST ao provedor. Levanta ProviderTransientError/ProviderPermanentError
+        (ADR-008); loga só canal, status e código (nunca corpo/URL com dados)."""
         try:
             resp = requests.post(url, timeout=_TIMEOUT, **kwargs)
         except requests.exceptions.RequestException as e:
-            _logger.warning("DZ23 WhatsApp erro de rede: %s", e)
-            raise UserError(_("Falha de rede ao enviar WhatsApp.")) from None
+            _logger.warning(
+                "DZ23 WhatsApp erro de rede canal=%s tipo=%s", self.id, type(e).__name__
+            )
+            raise ProviderTransientError(
+                _("Falha de rede ao enviar WhatsApp (%s).") % type(e).__name__
+            ) from None
         if resp.status_code >= 400:
-            _logger.info("DZ23 WhatsApp %s -> %s", url, resp.status_code)
-            raise UserError(_("O provedor recusou o envio (código %s).") % resp.status_code)
+            try:
+                data = resp.json()
+            except ValueError:
+                data = {}
+            error = classify_http_error(resp.status_code, resp.headers, data)
+            _logger.info(
+                "DZ23 WhatsApp canal=%s HTTP %s código=%s permanente=%s",
+                self.id,
+                resp.status_code,
+                error.code,
+                error.permanent,
+            )
+            raise error
         try:
             return resp.json()
         except ValueError:
@@ -381,7 +409,7 @@ class DZ23Channel(models.Model):
 
     def _send_evolution(self, to, body, correlation_id=None):
         if not (self.evo_base and self.evo_instance and self.evo_apikey):
-            raise UserError(_("Canal Evolution incompleto (base/instância/apikey)."))
+            raise ProviderPermanentError(_("Canal Evolution incompleto (base/instância/apikey)."))
         url = "%s/message/sendText/%s" % (self.evo_base.rstrip("/"), self.evo_instance)
         data = self._post(
             url, headers={"apikey": self.evo_apikey}, json={"number": to, "text": body}
@@ -389,12 +417,12 @@ class DZ23Channel(models.Model):
         # Sucesso REAL exige id de mensagem no corpo — 2xx sem id é falha do
         # provedor e deve reprocessar (não marcar "sent" e perder a resposta).
         if not (data.get("key") or {}).get("id"):
-            raise UserError(_("Evolution não confirmou o envio (sem id de mensagem)."))
+            raise ProviderTransientError(_("Evolution não confirmou o envio (sem id de mensagem)."))
         return data
 
     def _send_meta_cloud(self, to, body, correlation_id=None):
         if not (self.meta_token and self.meta_phone_id):
-            raise UserError(_("Canal Meta incompleto (token/phone_id)."))
+            raise ProviderPermanentError(_("Canal Meta incompleto (token/phone_id)."))
         url = "https://graph.facebook.com/%s/%s/messages" % (
             self.meta_api_version or "v20.0",
             self.meta_phone_id,
@@ -414,12 +442,12 @@ class DZ23Channel(models.Model):
             json=payload,
         )
         if not (data.get("messages") or [{}])[0].get("id"):
-            raise UserError(_("Meta não confirmou o envio (sem id de mensagem)."))
+            raise ProviderTransientError(_("Meta não confirmou o envio (sem id de mensagem)."))
         return data
 
     def _send_twilio(self, to, body, correlation_id=None):
         if not (self.twilio_sid and self.twilio_token and self.twilio_from):
-            raise UserError(_("Canal Twilio incompleto (sid/token/from)."))
+            raise ProviderPermanentError(_("Canal Twilio incompleto (sid/token/from)."))
         url = "https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json" % self.twilio_sid
         frm = (
             self.twilio_from
@@ -439,7 +467,7 @@ class DZ23Channel(models.Model):
             auth=(self.twilio_sid, self.twilio_token),
         )
         if not data.get("sid"):
-            raise UserError(_("Twilio não confirmou o envio (sem SID)."))
+            raise ProviderTransientError(_("Twilio não confirmou o envio (sem SID)."))
         return data
 
     # ---------- inbound (base: só registra; dz23_agent sobrescreve) ----------

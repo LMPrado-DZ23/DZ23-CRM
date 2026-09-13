@@ -25,6 +25,7 @@
                             <field name="connection_state"/>
                             <field name="connection_state_at"/>
                             <field name="last_webhook_at"/>
+                            <field name="rate_limited_until" invisible="not rate_limited_until"/>
                         </group>
                     </group>
                     <notebook>

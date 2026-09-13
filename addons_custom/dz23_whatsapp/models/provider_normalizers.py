@@ -73,6 +73,7 @@ def _base_event(provider, kind, **values):
         "error_message": None,
         "channel_ref": None,
         "state": None,
+        "correlation_id": None,
         "payload": None,
     }
     event.update(values)
@@ -198,6 +199,8 @@ def _meta_status(status, phone_id):
         error_code=error.get("code"),
         error_message=error.get("title") or error.get("message"),
         channel_ref=phone_id,
+        # Devolvido pela Meta: é o correlation_id da outbox (reconciliação de ack perdido).
+        correlation_id=status.get("biz_opaque_callback_data"),
         payload=status,
     )
 

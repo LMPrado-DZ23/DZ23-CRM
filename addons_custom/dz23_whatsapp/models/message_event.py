@@ -112,6 +112,9 @@ class DZ23MessageEvent(models.Model):
     error_message = fields.Char(readonly=True)
     outbox_id = fields.Many2one("dz23.message.outbox", ondelete="set null", readonly=True)
     inbox_id = fields.Many2one("dz23.message.inbox", ondelete="set null", readonly=True)
+    correlation_id = fields.Char(
+        index=True, readonly=True, help="Correlation id devolvido pelo provedor (Meta)."
+    )
     processed = fields.Boolean(default=False, readonly=True)
 
     _dedupe_uniq = models.Constraint(
@@ -177,6 +180,7 @@ class DZ23MessageEvent(models.Model):
             "error_code": str(event.get("error_code") or "")[:64] or False,
             "error_message": sanitize_error(event.get("error_message")) or False,
             "inbox_id": event.get("inbox_id") or False,
+            "correlation_id": str(event.get("correlation_id") or "")[:64] or False,
         }
         try:
             with self.env.cr.savepoint():
@@ -186,8 +190,26 @@ class DZ23MessageEvent(models.Model):
             if dup:
                 return dup, False
             raise
-        rec._apply_to_outbox()
+        # O evento já está persistido; se aplicar à outbox falhar, fica com
+        # processed=False e o cron de eventos reaplica (fila status_event, ADR-008).
+        try:
+            with self.env.cr.savepoint():
+                rec._apply_to_outbox()
+        except Exception as e:  # noqa: BLE001 - reaplicado pelo cron
+            _logger.warning(
+                "Evento %s não aplicado (%s); o cron reaplica.", rec.id, type(e).__name__
+            )
         return rec, True
+
+    @api.model
+    def _cron_apply_pending(self, limit=200):
+        """Reaplica eventos persistidos mas ainda não aplicados à outbox."""
+        for ev in self.sudo().search([("processed", "=", False)], order="id", limit=limit):
+            try:
+                with self.env.cr.savepoint():
+                    ev._apply_to_outbox()
+            except Exception as e:  # noqa: BLE001 - tenta de novo na próxima execução
+                _logger.warning("Evento %s ainda não aplicado (%s).", ev.id, type(e).__name__)
 
     def _apply_to_outbox(self):
         """Correlaciona com a outbox (canal + id do provedor) e aplica o status."""
@@ -202,6 +224,16 @@ class DZ23MessageEvent(models.Model):
                     ],
                     limit=1,
                 )
+                if not outbox and ev.correlation_id:
+                    outbox = Outbox.search(
+                        [
+                            ("channel_id", "=", ev.channel_id.id),
+                            ("correlation_id", "=", ev.correlation_id),
+                        ],
+                        limit=1,
+                    )
+                    if outbox and not outbox.provider_message_id:
+                        outbox._reconcile_provider_id(ev.provider_message_id)
                 if outbox:
                     outbox._apply_status(
                         ev.status,

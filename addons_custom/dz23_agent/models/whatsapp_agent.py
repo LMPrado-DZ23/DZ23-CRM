@@ -8,6 +8,7 @@
 #     responsável + expediente/feriados + fuso + duração/intervalo; cancelar/remarcar.
 # (ADR-004 e ADR-005)
 import datetime as dt
+import hashlib
 import logging
 import re
 import unicodedata
@@ -24,6 +25,8 @@ _logger = logging.getLogger(__name__)
 
 _ORIGIN = "WhatsApp DZ23"
 _PENDING_MINUTES = 30
+_PROMPT_VERSION = "sofia-2026-09-13"
+_LOCAL_AI_PROVIDERS = ("ollama",)
 
 _DEFAULT_PROMPT = (
     "Você é a Sofia, assistente virtual da equipe de atendimento, conversando pelo "
@@ -417,12 +420,28 @@ class DZ23ChannelAgent(models.Model):
         lead.message_post(body=_("🛒 Orçamento %s aberto: %s x %s") % (so.name, qty, variant.name))
         return so
 
-    def _agent_reply_ai(self, lead, text, fallback):
-        try:
-            return self.env["dz23.ai"].chat(text, system=self._agent_system_prompt(lead))
-        except Exception as e:  # noqa: BLE001 - IA pode não estar configurada
-            _logger.info("Agente: IA indisponível (%s), usando padrão.", type(e).__name__)
+    def _agent_prompt_version(self):
+        """Versão do prompt registrada em cada resposta de IA (auditoria)."""
+        if not self.agent_prompt:
+            return _PROMPT_VERSION
+        digest = hashlib.sha256(self.agent_prompt.encode("utf-8")).hexdigest()[:10]
+        return "canal-%s" % digest
+
+    def _agent_reply_ai(self, lead, text, fallback, correlation_id=None):
+        """Conversa livre com IA FORA do item da inbox (fila dz23.ai.request, ADR-008).
+        Retorna None (a resposta sai pelo worker) ou o fallback imediato quando a
+        política impede usar IA (provedor externo sem consentimento)."""
+        ai = self.env["dz23.ai"]
+        if ai._provider() not in _LOCAL_AI_PROVIDERS and not ai._external_allowed():
             return fallback
+        contact = self._agent_contact_for_lead(lead)
+        recipient = (contact and contact.provider_user_id) or lead.phone
+        if not recipient:
+            return fallback
+        self.env["dz23.ai.request"].sudo()._enqueue(
+            self, lead, recipient, text, fallback, correlation_id
+        )
+        return None
 
     # ---- pipeline principal (determinístico; LLM só conversa) ----
     def handle_inbound(self, number, text, raw=None, message=None):

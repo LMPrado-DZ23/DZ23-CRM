@@ -3,6 +3,7 @@ from . import (
     test_inbox,
     test_message_lifecycle,
     test_outbox,
+    test_provider_errors,
     test_provider_normalizers,
     test_queue_claim,
     test_tenancy,

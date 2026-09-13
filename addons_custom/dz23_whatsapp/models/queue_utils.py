@@ -51,34 +51,65 @@ def can_commit():
     return not config["test_enable"]
 
 
-def claim_due(cr, table, from_states, to_state, lease_seconds, limit):
+def claim_due(
+    cr,
+    table,
+    from_states,
+    to_state,
+    lease_seconds,
+    limit,
+    per_channel_limit=None,
+    skip_rate_limited=False,
+):
     """Reivindica até `limit` itens vencidos de forma atômica e curta.
 
-    O SELECT interno usa FOR UPDATE SKIP LOCKED (dois workers nunca pegam o mesmo
-    item); o UPDATE muda o estado, incrementa `attempts` e grava o lease. Retorna
-    os ids reivindicados. O chamador faz commit antes de processar (ADR-003).
+    O SELECT de travamento usa FOR UPDATE SKIP LOCKED (dois workers nunca pegam o
+    mesmo item); o UPDATE muda o estado, incrementa `attempts` e grava o lease.
+    `per_channel_limit` limita itens por canal nesta execução (um canal em rajada
+    não monopoliza o worker) e `skip_rate_limited` ignora canais pausados por 429
+    (ADR-008). Retorna os ids. O chamador faz commit antes de processar (ADR-003).
     """
+    rate_limit_filter = SQL(
+        """
+        AND NOT EXISTS (
+            SELECT 1 FROM dz23_channel c
+             WHERE c.id = q.channel_id AND c.rate_limited_until > %(now)s)
+        """,
+        now=_NOW_UTC,
+    )
     cr.execute(
         SQL(
             """
-            UPDATE %(table)s AS q
+            UPDATE %(table)s AS target
                SET status = %(to_state)s,
-                   attempts = q.attempts + 1,
+                   attempts = target.attempts + 1,
                    lease_until = %(now)s + %(lease)s * interval '1 second'
-             WHERE q.id IN (
+             WHERE target.id IN (
                    SELECT id FROM %(table)s
-                    WHERE status = ANY(%(from_states)s)
-                      AND next_attempt_at <= %(now)s
+                    WHERE id IN (
+                          SELECT cand.id FROM (
+                                 SELECT q.id, q.next_attempt_at,
+                                        row_number() OVER (
+                                            PARTITION BY q.channel_id
+                                            ORDER BY q.next_attempt_at, q.id) AS rn
+                                   FROM %(table)s q
+                                  WHERE q.status = ANY(%(from_states)s)
+                                    AND q.next_attempt_at <= %(now)s
+                                    %(rate_limit)s
+                          ) cand
+                           WHERE cand.rn <= %(per_channel)s)
                     ORDER BY next_attempt_at, id
                     LIMIT %(limit)s
                     FOR UPDATE SKIP LOCKED)
-         RETURNING q.id
+         RETURNING target.id
             """,
             table=SQL.identifier(table),
             to_state=to_state,
             now=_NOW_UTC,
             lease=int(lease_seconds),
             from_states=list(from_states),
+            rate_limit=rate_limit_filter if skip_rate_limited else SQL(""),
+            per_channel=int(per_channel_limit or limit),
             limit=int(limit),
         )
     )

@@ -3,7 +3,7 @@
 # Credenciais ficam no dz23.channel (restritas a admin), NUNCA no código.
 {
     "name": "DZ23 CRM — WhatsApp",
-    "version": "19.0.10.0.0",
+    "version": "19.0.11.0.0",
     "summary": "WhatsApp multi-tenant por canal (Meta Cloud API / Twilio / Evolution).",
     "author": "DZ23 (LEANDRO MARCOS PRADO LTDA)",
     "website": "https://www.dz23.com.br",
@@ -16,6 +16,7 @@
         "data/config_params.xml",
         "data/inbox_cron.xml",
         "data/outbox_cron.xml",
+        "data/event_cron.xml",
         "views/dz23_channel_views.xml",
         "views/message_queue_views.xml",
         "views/business_action_views.xml",

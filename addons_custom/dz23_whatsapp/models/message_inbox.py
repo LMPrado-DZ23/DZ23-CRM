@@ -93,6 +93,15 @@ class DZ23MessageInbox(models.Model):
     lease_until = fields.Datetime(index=True, readonly=True)
     duration_ms = fields.Integer(readonly=True, help="Duração da última tentativa.")
     error = fields.Char()
+    dlq_reason = fields.Selection(
+        [
+            ("permanent_error", "Erro permanente"),
+            ("max_attempts", "Tentativas esgotadas"),
+            ("lease_expired", "Lease expirado"),
+        ],
+        readonly=True,
+        index=True,
+    )
 
     _uniq = models.Constraint(
         "unique(provider, channel_id, message_id)", "Mensagem já recebida (idempotência)."
@@ -201,6 +210,7 @@ class DZ23MessageInbox(models.Model):
                 rec.write(
                     {
                         "status": "dead",
+                        "dlq_reason": "lease_expired",
                         "lease_until": False,
                         "error": _("DLQ: lease expirado após %s tentativas") % rec.attempts,
                     }
@@ -283,7 +293,11 @@ class DZ23MessageInbox(models.Model):
         }
         if self.attempts >= self.max_attempts:
             vals.update(
-                {"status": "dead", "error": _("DLQ: %s") % sanitize_error(exc)},
+                {
+                    "status": "dead",
+                    "dlq_reason": "max_attempts",
+                    "error": _("DLQ: %s") % sanitize_error(exc),
+                },
             )
             _logger.warning("Inbox %s -> DLQ após %s tentativas.", self.id, self.attempts)
         else:
@@ -309,6 +323,7 @@ class DZ23MessageInbox(models.Model):
                     "next_attempt_at": fields.Datetime.now(),
                     "lease_until": False,
                     "error": False,
+                    "dlq_reason": False,
                 }
             )
         return True
