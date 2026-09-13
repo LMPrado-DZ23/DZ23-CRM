@@ -7,7 +7,7 @@
 - autorização do usuário (2026-09-13): executar todas as fases e subir para o GitHub;
   "não deixar nenhuma falha detectada no GitHub".
 - branch: `feat/crm-evolution` (a partir de `fd04837`), PR #6 (draft)
-- estado: EXECUTING
+- estado: COMPLETED (2026-09-13) — PR #6 mesclado na `main` com autorização explícita do usuário
 - histórico da missão anterior: ver `git log` (commits até `fd04837`).
 
 ## Critérios de aceite (prompt mestre §17 + usuário)
@@ -45,7 +45,7 @@ deps-container, odoo-tests) + PRs do dependabot sem falha. 20. 3 auditores: 0 CR
 | 11 Testes (matriz) | DONE | d4cf471 | docs/TEST_MATRIX.md; smoke 249/249 + upgrade -u; CI com passo de upgrade; bug achado: webhook Meta sem teto de 1000 eventos |
 | 12 Documentação | DONE | e3e5cd1 | README/ARCHITECTURE/SECURITY/docs index/INTEGRATIONS/webhooks/queue_recovery; botão de rotação de segredo (método sem UI); smoke 249/249 + upgrade; links verificados; dev whatsapp atualizado (dump /tmp/dz23crm_pre_fase12.dump) |
 | Auditoria 3 agentes | DONE | 1dad9a8 + lote 2 | audit/FINAL_THREE_AGENT_REVIEW.md: 1 CRITICAL (Woovi) + 4 HIGH corrigidos; 17 MEDIUM (16 corrigidos, 1 aceito parcial); LOW/IMPROVEMENT corrigidos ou documentados; smoke 264/264 + upgrade + gate de log; bandit limpo; dev atualizado (dump /tmp/dz23crm_pre_auditoria.dump) |
-| Push + CI verde + PR pronto | PENDING | — | — |
+| Push + CI verde + PR pronto | DONE | 0e78c88 | PR #6 mesclado na main (merge commit 0e78c88); CI da main verde em todos os jobs (lint, secrets, sast, deps-container, odoo-tests — run 34777444524) |
 
 ## Backlog adicional (feedback externo 2026-09-13)
 - E-mail de terceiro (Dial) apontou falta de callbacks de status em `main` — já
