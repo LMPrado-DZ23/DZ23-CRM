@@ -7,11 +7,13 @@
 # do 200; falha de persistência => 500 (o provedor reentrega). Loga só metadados.
 import json
 import logging
+import time
 
 from odoo import http
 from odoo.http import request
 
 from ..models import provider_normalizers as pn
+from ..models.queue_utils import log_event
 
 _logger = logging.getLogger(__name__)
 
@@ -38,8 +40,17 @@ def _parse_json(raw):
 
 def _ingest(channel, events):
     """Persistência mínima ANTES do 200. Falha => False => HTTP 500."""
+    started = time.monotonic()
     try:
         channel.sudo()._ingest_events(events)
+        log_event(
+            _logger,
+            "webhook_ingested",
+            channel=channel.id,
+            provider=channel.provider,
+            events=len(events),
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
         return True
     except Exception as e:  # noqa: BLE001 - converte em 500 controlado
         _logger.error(

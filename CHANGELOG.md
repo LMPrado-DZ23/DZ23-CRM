@@ -5,6 +5,19 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 9 — Observabilidade (`dz23_whatsapp` 19.0.14.0.0, `dz23_agent` 19.0.6.0.0)
+- **Saúde dos canais** (ADR-012): último webhook/recebida/envio/status, fila mais
+  antiga, DLQ, conexão Evolution e pausa por 429, com estado Saudável/Atenção/Crítico
+  e motivos (inclui alerta de envio sem nenhum status de entrega — webhook de status
+  mal configurado).
+- **Métricas diárias por canal** (fuso da empresa, recálculo idempotente de hora em
+  hora): recebidas, enviadas, entregues, lidas, taxas de entrega/leitura, falhas, DLQ,
+  latência do webhook, 1ª resposta média e idade da fila; mais transferências para
+  humano, orçamentos, pedidos, pagamentos confirmados, conversão e desempenho da IA.
+  Lista, pivô e gráfico; supervisores enxergam só a própria empresa.
+- **Logs estruturados sem PII** (`dz23_event=... chave=valor`); logs que expunham
+  exceção crua ou URL com CNPJ/CEP foram saneados.
+
 ### Fase 8 — Governança de IA (`dz23_ai` 19.0.2.0.0, `dz23_agent` 19.0.5.0.0)
 - **Configuração por empresa** (ADR-011): provedor, modelo, política de IA externa
   (herdar/permitir/negar) e limites de uso diário (chamadas) e mensal (custo US$).

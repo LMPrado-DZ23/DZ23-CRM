@@ -5,4 +5,5 @@ from . import (
     test_ai_queue,
     test_conversation_bot,
     test_media_to_lead,
+    test_metrics_agent,
 )

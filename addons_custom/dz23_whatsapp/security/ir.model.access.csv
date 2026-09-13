@@ -21,3 +21,5 @@ access_dz23_message_template_user,dz23.message.template.user,model_dz23_message_
 access_dz23_message_template_manager,dz23.message.template.manager,model_dz23_message_template,base.group_system,1,1,1,1
 access_dz23_business_action_user,dz23.business.action.user,model_dz23_business_action,base.group_user,1,0,0,0
 access_dz23_business_action_manager,dz23.business.action.manager,model_dz23_business_action,base.group_system,1,1,1,1
+access_dz23_metrics_daily_supervisor,dz23.metrics.daily.supervisor,model_dz23_metrics_daily,group_dz23_supervisor,1,0,0,0
+access_dz23_metrics_daily_manager,dz23.metrics.daily.manager,model_dz23_metrics_daily,base.group_system,1,1,1,1

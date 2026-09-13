@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <!-- Métricas diárias (ADR-012): recalcula hoje e ontem. -->
+    <record id="cron_dz23_metrics_refresh" model="ir.cron">
+        <field name="name">DZ23: métricas de atendimento</field>
+        <field name="model_id" ref="model_dz23_metrics_daily"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_refresh()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">hours</field>
+        <field name="active" eval="True"/>
+    </record>
+</odoo>

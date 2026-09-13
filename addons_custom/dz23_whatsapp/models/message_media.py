@@ -202,7 +202,7 @@ class DZ23MessageMedia(models.Model):
             self.write(
                 {"status": "rejected", "lease_until": False, "error": sanitize_error(rejection)}
             )
-            _logger.info("Mídia %s recusada: %s", self.id, rejection)
+            _logger.info("Mídia %s recusada: %s", self.id, sanitize_error(rejection))
         except Exception as error:  # noqa: BLE001 - retry
             self._register_failure(error)
         _logger.debug(

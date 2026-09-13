@@ -3,6 +3,7 @@
 # saneamento de mensagens de erro (sem PII em banco/log).
 import hashlib
 import json
+import logging
 import re
 import secrets
 
@@ -10,6 +11,7 @@ from odoo.tools import SQL, config
 
 _JITTER = secrets.SystemRandom()
 _PREVIEW_CHARS = 500
+_LOG_VALUE_CHARS = 120
 _RE_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _RE_LONG_DIGITS = re.compile(r"\d{8,}")
 _NOW_UTC = SQL("(clock_timestamp() AT TIME ZONE 'utc')")
@@ -26,6 +28,19 @@ def sanitize_error(message, limit=200):
     text = _RE_EMAIL.sub("[email]", str(message or ""))
     text = _RE_LONG_DIGITS.sub("[num]", text)
     return text[:limit]
+
+
+def log_event(logger, event, level=logging.INFO, **values):
+    """Log estruturado `dz23_event=<nome> chave=valor` (chaves em ordem estável, fácil
+    de filtrar/agregar). Valores passam por `sanitize_error`: registre ids, contagens,
+    durações e códigos — nunca texto de mensagem, telefone ou payload (ADR-012)."""
+    if not logger.isEnabledFor(level):
+        return
+    parts = ["dz23_event=%s" % event]
+    for key in sorted(values):
+        value = sanitize_error(values[key], limit=_LOG_VALUE_CHARS)
+        parts.append("%s=%s" % (key, value.replace(" ", "_") or "-"))
+    logger.log(level, "%s", " ".join(parts))
 
 
 def payload_json(payload):

@@ -60,6 +60,29 @@
                         <page string="Agente">
                             <field name="agent_prompt" placeholder="Personalidade/instruções do atendente virtual deste canal…"/>
                         </page>
+                        <page string="Saúde" name="health" groups="base.group_system">
+                            <group>
+                                <group>
+                                    <field name="health_state" widget="badge"
+                                           decoration-success="health_state == 'ok'"
+                                           decoration-warning="health_state == 'warning'"
+                                           decoration-danger="health_state == 'critical'"/>
+                                    <field name="last_inbound_at"/>
+                                    <field name="last_sent_at"/>
+                                    <field name="last_status_at"/>
+                                </group>
+                                <group>
+                                    <field name="oldest_inbox_pending_at"/>
+                                    <field name="oldest_outbox_pending_at"/>
+                                    <field name="pending_inbox_count"/>
+                                    <field name="pending_outbox_count"/>
+                                    <field name="dlq_inbox_count"/>
+                                    <field name="dlq_outbox_count"/>
+                                    <field name="dlq_media_count"/>
+                                </group>
+                            </group>
+                            <field name="health_notes" readonly="1"/>
+                        </page>
                     </notebook>
                 </sheet>
             </form>

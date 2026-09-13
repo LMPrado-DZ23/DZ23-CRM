@@ -302,8 +302,12 @@ class DZ23Channel(models.Model):
             try:
                 validate_event(event)
             except ValueError as e:
+                from .queue_utils import sanitize_error
+
                 stats["invalid"] += 1
-                _logger.warning("Evento descartado (contrato) canal=%s motivo=%s", channel.id, e)
+                _logger.warning(
+                    "Evento descartado (contrato) canal=%s motivo=%s", channel.id, sanitize_error(e)
+                )
                 continue
             if event["kind"] == "connection":
                 channel._apply_connection_state(event)
