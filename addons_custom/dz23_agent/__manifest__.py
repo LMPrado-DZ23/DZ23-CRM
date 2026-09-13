@@ -3,7 +3,7 @@
 # intenção de horário, cria evento na Agenda e confirma. Provedor-agnóstico.
 {
     "name": "DZ23 CRM — Agente IA (WhatsApp + Agenda)",
-    "version": "19.0.6.0.0",
+    "version": "19.0.7.0.0",
     "summary": "Auto-resposta de WhatsApp por IA + agendamento automático na Agenda.",
     "author": "DZ23 (LEANDRO MARCOS PRADO LTDA)",
     "website": "https://www.dz23.com.br",

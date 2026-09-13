@@ -102,10 +102,19 @@ class DZ23Conversation(models.Model):
         conversation = Conversation.search([("contact_id", "=", contact.id)], limit=1)
         if conversation:
             return conversation
-        state = "bot_active" if contact.channel_id.agent_autoreply else "open"
+        vals = {
+            "contact_id": contact.id,
+            "state": "bot_active" if contact.channel_id.agent_autoreply else "open",
+        }
+        # Titular com opt-out ou anonimizado (ADR-013): nova conversa já nasce sem
+        # mensagens proativas.
+        if self.env["dz23.privacy.suppression"]._is_suppressed(
+            contact.company_id, contact.provider_user_id
+        ):
+            vals["opt_out"] = True
         try:
             with self.env.cr.savepoint():
-                return Conversation.create({"contact_id": contact.id, "state": state})
+                return Conversation.create(vals)
         except psycopg2.IntegrityError:
             return Conversation.search([("contact_id", "=", contact.id)], limit=1)
 

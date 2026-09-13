@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Pedido do titular (ADR-013) -->
+    <record id="dz23_privacy_request_view_form" model="ir.ui.view">
+        <field name="name">dz23.privacy.request.form</field>
+        <field name="model">dz23.privacy.request</field>
+        <field name="arch" type="xml">
+            <form string="Pedido do titular (LGPD)">
+                <sheet>
+                    <div class="alert alert-info" role="status">
+                        Exporta ou anonimiza as mensagens, conversas e anexos de WhatsApp deste
+                        telefone na empresa escolhida. Pedidos, faturas e pagamentos são mantidos
+                        (obrigação fiscal). O arquivo exportado expira em 7 dias.
+                    </div>
+                    <group>
+                        <field name="company_id" groups="base.group_multi_company"
+                               options="{'no_create': True, 'no_open': True}"/>
+                        <field name="phone" placeholder="+55 61 99999-0000"/>
+                        <field name="contact_count"/>
+                        <field name="reason" placeholder="Protocolo ou motivo (obrigatório para anonimizar)"/>
+                    </group>
+                </sheet>
+                <footer>
+                    <button name="action_export" type="object" string="Exportar dados (JSON)"
+                            class="btn-primary" invisible="not contact_count"/>
+                    <button name="action_anonymize" type="object" string="Anonimizar titular"
+                            class="btn-danger" invisible="not contact_count"
+                            confirm="Ação irreversível: textos, anexos e identificação do titular serão removidos. Continuar?"/>
+                    <button string="Fechar" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="dz23_privacy_request_action" model="ir.actions.act_window">
+        <field name="name">Pedido do titular (LGPD)</field>
+        <field name="res_model">dz23.privacy.request</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <!-- Auditoria de acesso -->
+    <record id="dz23_access_log_view_list" model="ir.ui.view">
+        <field name="name">dz23.access.log.list</field>
+        <field name="model">dz23.access.log</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="create_date" string="Quando"/>
+                <field name="user_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="action"/>
+                <field name="res_model"/>
+                <field name="res_ids"/>
+                <field name="detail"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_access_log_view_search" model="ir.ui.view">
+        <field name="name">dz23.access.log.search</field>
+        <field name="model">dz23.access.log</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="user_id"/>
+                <field name="action"/>
+                <field name="res_model"/>
+                <filter name="filter_date" string="Data" date="create_date"/>
+                <filter name="subject_requests" string="Pedidos do titular"
+                        domain="[('action', 'in', ('export_subject', 'anonymize_subject'))]"/>
+                <group>
+                    <filter name="group_user" string="Usuário" context="{'group_by': 'user_id'}"/>
+                    <filter name="group_action" string="Ação" context="{'group_by': 'action'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dz23_access_log_action" model="ir.actions.act_window">
+        <field name="name">Auditoria de acesso</field>
+        <field name="res_model">dz23.access.log</field>
+        <field name="view_mode">list</field>
+    </record>
+
+    <!-- Supressões -->
+    <record id="dz23_privacy_suppression_view_list" model="ir.ui.view">
+        <field name="name">dz23.privacy.suppression.list</field>
+        <field name="model">dz23.privacy.suppression</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false">
+                <field name="create_date" string="Desde"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="reason"/>
+                <field name="subject_hash"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_privacy_suppression_action" model="ir.actions.act_window">
+        <field name="name">Supressões (opt-out / LGPD)</field>
+        <field name="res_model">dz23.privacy.suppression</field>
+        <field name="view_mode">list</field>
+    </record>
+
+    <menuitem id="dz23_privacy_request_menu" name="Pedido do titular (LGPD)"
+              parent="dz23_channel_menu_root" action="dz23_privacy_request_action"
+              sequence="60" groups="base.group_system"/>
+    <menuitem id="dz23_access_log_menu" name="Auditoria de acesso"
+              parent="dz23_channel_menu_root" action="dz23_access_log_action"
+              sequence="61" groups="base.group_system"/>
+    <menuitem id="dz23_privacy_suppression_menu" name="Supressões (opt-out / LGPD)"
+              parent="dz23_channel_menu_root" action="dz23_privacy_suppression_action"
+              sequence="62" groups="base.group_system"/>
+    <menuitem id="dz23_privacy_request_menu_attendance" name="Pedido do titular (LGPD)"
+              parent="dz23_conversation_menu_root" action="dz23_privacy_request_action"
+              sequence="60" groups="dz23_whatsapp.group_dz23_supervisor"/>
+</odoo>

@@ -25,7 +25,8 @@ def backoff_seconds(attempts):
 
 def sanitize_error(message, limit=200):
     """Erro curto, sem e-mail nem sequências longas de dígitos (telefone/documento)."""
-    text = _RE_EMAIL.sub("[email]", str(message or ""))
+    text = "" if message is None or message is False else str(message)
+    text = _RE_EMAIL.sub("[email]", text)
     text = _RE_LONG_DIGITS.sub("[num]", text)
     return text[:limit]
 

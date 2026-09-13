@@ -5,6 +5,22 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 10 — LGPD e retenção (`dz23_whatsapp` 19.0.15.0.0, `dz23_agent` 19.0.7.0.0)
+- **Retenção por empresa** (ADR-013): mensagens finalizadas anonimizadas (texto,
+  payload e telefone → pseudônimo HMAC por empresa) após 365 dias; prévia de status
+  após 180; auditoria após 730; notas automáticas do robô no lead seguem o prazo das
+  mensagens. Nada na fila é tocado; pedidos, faturas e pagamentos nunca.
+- **Pedido do titular**: exportação JSON (contatos, conversas, mensagens, status,
+  anexos, leads, pedidos, IA — expira em 7 dias) e anonimização com motivo obrigatório
+  (textos, anexos, notas, lead, IA, contato; envios pendentes cancelados; documentos
+  fiscais mantidos).
+- **Supressão**: opt-out e titular anonimizado; conversa recriada nasce com opt-out.
+- **Auditoria de acesso** append-only: abrir conversa/mensagem, exportar, anonimizar,
+  reenfileirar DLQ e alterar credencial (sem valores).
+- `docs/LGPD.md` (finalidades, bases legais, prazos, titular, IA externa, incidentes) e
+  `docs/runbooks/backup_restore.md` (backup, rotação, restauração com reaplicação
+  da LGPD, rollback de atualização).
+
 ### Fase 9 — Observabilidade (`dz23_whatsapp` 19.0.14.0.0, `dz23_agent` 19.0.6.0.0)
 - **Saúde dos canais** (ADR-012): último webhook/recebida/envio/status, fila mais
   antiga, DLQ, conexão Evolution e pausa por 429, com estado Saudável/Atenção/Crítico

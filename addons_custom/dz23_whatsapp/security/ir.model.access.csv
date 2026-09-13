@@ -23,3 +23,8 @@ access_dz23_business_action_user,dz23.business.action.user,model_dz23_business_a
 access_dz23_business_action_manager,dz23.business.action.manager,model_dz23_business_action,base.group_system,1,1,1,1
 access_dz23_metrics_daily_supervisor,dz23.metrics.daily.supervisor,model_dz23_metrics_daily,group_dz23_supervisor,1,0,0,0
 access_dz23_metrics_daily_manager,dz23.metrics.daily.manager,model_dz23_metrics_daily,base.group_system,1,1,1,1
+access_dz23_access_log_manager,dz23.access.log.manager,model_dz23_access_log,base.group_system,1,0,0,0
+access_dz23_privacy_suppression_supervisor,dz23.privacy.suppression.supervisor,model_dz23_privacy_suppression,group_dz23_supervisor,1,0,0,0
+access_dz23_privacy_suppression_manager,dz23.privacy.suppression.manager,model_dz23_privacy_suppression,base.group_system,1,1,1,1
+access_dz23_privacy_request_supervisor,dz23.privacy.request.supervisor,model_dz23_privacy_request,group_dz23_supervisor,1,1,1,1
+access_dz23_privacy_request_manager,dz23.privacy.request.manager,model_dz23_privacy_request,base.group_system,1,1,1,1

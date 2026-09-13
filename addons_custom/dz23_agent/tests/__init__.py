@@ -6,4 +6,5 @@ from . import (
     test_conversation_bot,
     test_media_to_lead,
     test_metrics_agent,
+    test_privacy_agent,
 )

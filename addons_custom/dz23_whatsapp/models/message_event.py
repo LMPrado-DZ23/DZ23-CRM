@@ -90,6 +90,8 @@ class DZ23MessageEvent(models.Model):
 
     # Campos que podem mudar após a criação (vínculo/processamento); o resto é fato.
     _MUTABLE_FIELDS = frozenset({"processed", "outbox_id", "inbox_id"})
+    # Só a política de retenção (ADR-013) limpa estes campos, e só limpa.
+    _RETENTION_FIELDS = frozenset({"payload_preview", "error_message"})
 
     channel_id = fields.Many2one(
         "dz23.channel", required=True, ondelete="cascade", index=True, readonly=True
@@ -127,7 +129,12 @@ class DZ23MessageEvent(models.Model):
     _pending_idx = models.Index("(id) WHERE processed IS NOT TRUE")
 
     def write(self, vals):
-        if set(vals) - self._MUTABLE_FIELDS:
+        allowed = self._MUTABLE_FIELDS
+        if self.env.context.get("dz23_retention") and not any(
+            vals.get(field) for field in self._RETENTION_FIELDS
+        ):
+            allowed = allowed | self._RETENTION_FIELDS
+        if set(vals) - allowed:
             raise UserError(_("Eventos de mensagem são imutáveis (append-only)."))
         return super().write(vals)
 

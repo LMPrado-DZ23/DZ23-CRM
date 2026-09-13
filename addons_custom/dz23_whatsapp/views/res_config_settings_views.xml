@@ -41,6 +41,26 @@
                             </div>
                         </setting>
                     </block>
+                    <block title="Privacidade e retenção (LGPD)"
+                           help="Prazos da empresa atual. Pedidos, faturas e pagamentos nunca são apagados por estas regras.">
+                        <setting string="Mensagens"
+                                 help="Texto, legenda, payload e telefone de mensagens finalizadas são anonimizados após o prazo. 0 = não anonimizar.">
+                            <field name="dz23_message_retention_days"/>
+                        </setting>
+                        <setting string="Payload dos status" help="Prévia do payload dos eventos de entrega/leitura.">
+                            <field name="dz23_event_retention_days"/>
+                        </setting>
+                        <setting string="Anexos recebidos" help="Arquivos baixados do WhatsApp.">
+                            <field name="dz23_media_retention_days"/>
+                        </setting>
+                        <setting string="Auditoria de acesso">
+                            <field name="dz23_access_log_retention_days"/>
+                        </setting>
+                        <setting string="Pedido do titular" help="Exportar ou anonimizar os dados de um telefone.">
+                            <button name="%(dz23_whatsapp.dz23_privacy_request_action)d" type="action"
+                                    string="Abrir pedido do titular" class="btn-link" icon="fa-user-secret"/>
+                        </setting>
+                    </block>
                 </app>
             </xpath>
         </field>

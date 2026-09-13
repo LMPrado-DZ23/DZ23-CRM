@@ -6,6 +6,7 @@ from . import (
     test_media,
     test_message_lifecycle,
     test_outbox,
+    test_privacy,
     test_provider_errors,
     test_provider_normalizers,
     test_queue_claim,
