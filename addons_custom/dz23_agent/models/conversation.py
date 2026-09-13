@@ -13,7 +13,15 @@ HANDOFF_REASONS = [
 class DZ23ConversationCrm(models.Model):
     _inherit = "dz23.conversation"
 
-    lead_id = fields.Many2one(related="contact_id.lead_id", store=True, index=True, string="Lead")
+    # Lead e pedidos só para quem tem acesso a Vendas: o atendente puro abre a conversa
+    # sem erro de permissão (auditoria C-1).
+    lead_id = fields.Many2one(
+        related="contact_id.lead_id",
+        store=True,
+        index=True,
+        string="Lead",
+        groups="sales_team.group_sale_salesman",
+    )
     bot_turns = fields.Integer("Respostas livres seguidas do robô", default=0, readonly=True)
     handoff_reason = fields.Selection(
         HANDOFF_REASONS, string="Transferida pelo robô", readonly=True, tracking=True
@@ -52,13 +60,14 @@ class DZ23ConversationCrm(models.Model):
         string="Pedidos",
         compute="_compute_sale_order_ids",
         search="_search_sale_order_ids",
+        groups="sales_team.group_sale_salesman",
     )
 
     @api.depends("lead_id.partner_id")
     def _compute_sale_order_ids(self):
         Order = self.env["sale.order"]
         for conversation in self:
-            partner = conversation.lead_id.partner_id
+            partner = conversation.sudo().lead_id.partner_id
             conversation.sale_order_ids = (
                 Order.search(
                     [

@@ -4,7 +4,7 @@
 import uuid
 
 from odoo.exceptions import UserError
-from odoo.tests import TransactionCase, tagged
+from odoo.tests import TransactionCase, new_test_user, tagged
 
 
 def _ai_offline(*_args, **_kwargs):
@@ -80,3 +80,20 @@ class TestConversationBot(TransactionCase):
             conversation, Conversation.search([("lead_id", "=", conversation.lead_id.id)])
         )
         self.assertIn(order, conversation.sale_order_ids)
+
+    def test_attendant_without_sales_rights_opens_conversation(self):
+        # Auditoria C-1: o formulário não pode quebrar para quem só é Atendente.
+        self.channel.handle_inbound(self.number, "quanto custa o Servico Gama QA7?")
+        conversation = self._conversation()
+        attendant = new_test_user(
+            self.env,
+            login="atendente_sem_vendas_qa12",
+            groups="dz23_whatsapp.group_dz23_attendant",
+        )
+        Conversation = self.env["dz23.conversation"].with_user(attendant)
+        views = Conversation.get_views([(False, "form")])
+        spec = {name: {} for name in views["models"]["dz23.conversation"]["fields"]}
+        self.assertNotIn("sale_order_ids", spec)
+        self.assertNotIn("lead_id", spec)
+        record = conversation.with_user(attendant).web_read(spec)
+        self.assertEqual(record[0]["id"], conversation.id)

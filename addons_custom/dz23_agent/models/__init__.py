@@ -3,6 +3,7 @@ from . import (
     ai_request,
     channel_contact,
     conversation,
+    message_media,
     metrics,
     privacy_agent,
     res_config_settings,

@@ -7,7 +7,9 @@ from datetime import datetime, time, timedelta
 
 import pytz
 from odoo import api, fields, models
+from odoo.exceptions import AccessError
 from odoo.tools import SQL
+from odoo.tools.translate import _
 
 from .queue_utils import log_event
 
@@ -215,9 +217,10 @@ class DZ23MetricsDaily(models.Model):
         return record
 
     @api.model
-    def _cron_refresh(self, days=2):
+    def _cron_refresh(self, days=2, companies=None):
         """Recalcula hoje e ontem (no fuso de cada empresa): idempotente."""
-        channels = self.env["dz23.channel"].sudo().with_context(active_test=False).search([])
+        domain = [("company_id", "in", companies.ids)] if companies else []
+        channels = self.env["dz23.channel"].sudo().with_context(active_test=False).search(domain)
         count = 0
         for channel in channels:
             tz_name = channel.company_id.partner_id.tz or _DEFAULT_TZ
@@ -231,7 +234,14 @@ class DZ23MetricsDaily(models.Model):
         log_event(_logger, "metrics_refreshed", channels=len(channels), rows=count)
         return count
 
-    @api.model
     def action_refresh_metrics(self):
-        self._cron_refresh()
+        """Botão "Atualizar agora" (cabeçalho da lista, sem @api.model: o cliente envia os
+        ids). Só supervisor/administrador e só as empresas ativas do usuário."""
+        user = self.env.user
+        if not (
+            user.has_group("dz23_whatsapp.group_dz23_supervisor")
+            or user.has_group("base.group_system")
+        ):
+            raise AccessError(_("Somente supervisores de atendimento atualizam as métricas."))
+        self._cron_refresh(companies=self.env.companies)
         return {"type": "ir.actions.client", "tag": "reload"}

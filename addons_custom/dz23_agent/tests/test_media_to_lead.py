@@ -51,3 +51,11 @@ class TestMediaToLead(TransactionCase):
             self.lead.message_ids.filtered(lambda m: attachments in m.attachment_ids),
             "o anexo aparece no chatter do lead",
         )
+        # Auditoria B-2: a retenção (e a anonimização, que usa o mesmo método) apaga
+        # também a cópia do arquivo no lead.
+        media = self.env["dz23.message.media"].search([("channel_id", "=", self.channel.id)])
+        self.assertEqual(media.lead_attachment_id, attachments)
+        media.write({"expires_at": "2020-01-01 00:00:00"})
+        self.env["dz23.message.media"]._cron_purge_expired()
+        self.assertFalse(attachments.exists(), "cópia no lead removida pela retenção")
+        self.assertEqual(media.status, "expired")

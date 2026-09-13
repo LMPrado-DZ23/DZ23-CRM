@@ -110,7 +110,7 @@
             <field name="how_to" type="html"><ol>
                 <li>Suba uma instância Evolution API (self-host) e crie uma instância/QR.</li>
                 <li>Pegue a base URL, o nome da instância e a apikey.</li>
-                <li>Cole em Ajustes &gt; DZ23 WhatsApp &gt; Evolution e selecione o provedor Evolution.</li>
+                <li>Em DZ23 WhatsApp &gt; Canais, crie um canal "Evolution", cole base URL, instância e apikey e clique em "Conectar WhatsApp (QR)" — o webhook do canal é configurado automaticamente.</li>
             </ol></field>
         </record>
         <record id="int_wa_meta" model="dz23.integration">
@@ -121,7 +121,7 @@
             <field name="how_to" type="html"><ol>
                 <li>Em developers.facebook.com crie um App &gt; produto "WhatsApp".</li>
                 <li>Pegue o <b>phone_number_id</b>, um <b>token permanente</b> e o <b>App Secret</b>.</li>
-                <li>Cole em Ajustes &gt; DZ23 WhatsApp &gt; Meta; configure o webhook <code>/dz23/whatsapp/webhook</code> com o verify token.</li>
+                <li>Em DZ23 WhatsApp &gt; Canais, crie um canal "Meta Cloud" com esses dados e um verify token; no painel da Meta use a "URL do webhook" do canal (<code>/dz23/whatsapp/meta/webhook/&lt;token&gt;</code>) e assine o campo <code>messages</code>.</li>
             </ol></field>
         </record>
         <record id="int_twilio" model="dz23.integration">
@@ -132,7 +132,7 @@
             <field name="how_to" type="html"><ol>
                 <li>Em console.twilio.com pegue Account SID e Auth Token.</li>
                 <li>Ative o remetente WhatsApp (sandbox ou número aprovado).</li>
-                <li>Cole em Ajustes &gt; DZ23 WhatsApp &gt; Twilio (SID, token, número "from").</li>
+                <li>Em DZ23 WhatsApp &gt; Canais, crie um canal "Twilio" (SID, token, número "from") e use a "URL do webhook" do canal na mensagem recebida e no status callback.</li>
             </ol></field>
         </record>
         <record id="int_meta_social" model="dz23.integration">

@@ -104,6 +104,28 @@ class DZ23WooviEvent(models.Model):
             )
         return tx
 
+    def _trusted_payment_data(self, tx):
+        """Webhook é só GATILHO: a assinatura Woovi é a mesma para todas as contas, então
+        um evento assinado não prova que a cobrança é deste lojista. O status aplicado é
+        sempre relido na API com a credencial da transação, e a cobrança do evento precisa
+        ser a da transação. Retorna (dados, rejeição). Conciliação já vem da API."""
+        data = json.loads(self.payload or "{}")
+        if self.source != "webhook":
+            return data, None
+        if not tx.woovi_charge_id:
+            return None, ("ignored", "transação sem cobrança Woovi")
+        charge = data.get("charge") or {}
+        claimed = {charge.get("identifier"), charge.get("globalID")} - {None, ""}
+        if claimed and tx.woovi_charge_id not in claimed:
+            return None, ("rejected", "cobrança do evento não pertence à transação")
+        response = tx._send_api_request("GET", "/charge/%s" % tx.woovi_charge_id)
+        remote = (response or {}).get("charge") or {}
+        if not remote:
+            raise ValueError("consulta da cobrança Woovi sem dados")  # retry pelo cron
+        if remote.get("correlationID") and remote["correlationID"] != tx.reference:
+            return None, ("rejected", "cobrança consultada não corresponde à transação")
+        return {"event": data.get("event"), "charge": remote}, None
+
     def _process_one(self):
         self.ensure_one()
         if self.state != "pending":
@@ -123,7 +145,11 @@ class DZ23WooviEvent(models.Model):
                         }
                     )
                     return
-                outcome, message = tx._woovi_apply_payment_data(json.loads(self.payload or "{}"))
+                data, rejection = self._trusted_payment_data(tx)
+                if rejection:
+                    outcome, message = rejection
+                else:
+                    outcome, message = tx._woovi_apply_payment_data(data)
                 self.write(
                     {
                         "transaction_id": tx.id,

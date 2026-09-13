@@ -237,6 +237,12 @@ class DZ23MessageMedia(models.Model):
         return True
 
     # ---------- retenção ----------
+    def _dz23_purge_files(self):
+        """Apaga o arquivo e TODAS as cópias conhecidas (módulos que copiam o anexo
+        estendem este método). Usado pela retenção e pela anonimização do titular."""
+        self.attachment_id.sudo().unlink()
+        self.write({"status": "expired", "attachment_id": False})
+
     @api.model
     def _cron_purge_expired(self, limit=500):
         expired = self.sudo().search(
@@ -248,8 +254,7 @@ class DZ23MessageMedia(models.Model):
             limit=limit,
         )
         for media in expired:
-            media.attachment_id.sudo().unlink()
-            media.write({"status": "expired", "attachment_id": False})
+            media._dz23_purge_files()
         if expired:
             _logger.info("Retenção: %s arquivo(s) de mídia removido(s).", len(expired))
         return len(expired)

@@ -535,6 +535,7 @@ class DZ23ChannelAgent(models.Model):
         if not lead:
             return False
         copy = attachment.sudo().copy({"res_model": lead._name, "res_id": lead.id})
+        media.sudo().lead_attachment_id = copy.id  # retenção/LGPD apagam a cópia também
         lead.sudo().message_post(
             body=_("📎 Arquivo recebido pelo WhatsApp: %s") % media.filename,
             attachment_ids=[copy.id],

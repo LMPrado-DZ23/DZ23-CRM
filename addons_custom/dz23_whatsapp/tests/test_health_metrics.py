@@ -164,6 +164,21 @@ class TestHealthMetrics(TransactionCase):
         self.assertIn(mine, visible)
         self.assertNotIn(theirs, visible)
 
+    def test_refresh_button_requires_supervisor(self):
+        from odoo.exceptions import AccessError
+
+        plain = new_test_user(self.env, login="comum_metricas_qa12", groups="base.group_user")
+        with self.assertRaises(AccessError):
+            self.Metrics.with_user(plain).browse().action_refresh_metrics()
+        supervisor = new_test_user(
+            self.env,
+            login="supervisor_metricas_qa12",
+            groups="dz23_whatsapp.group_dz23_supervisor",
+        )
+        action = self.Metrics.with_user(supervisor).browse().action_refresh_metrics()
+        self.assertEqual(action["tag"], "reload")
+        self.assertTrue(self.Metrics.search_count([("channel_id", "=", self.channel.id)]))
+
     def test_cron_refresh_covers_today_and_yesterday(self):
         self.assertGreaterEqual(self.Metrics._cron_refresh(), 2)
         self.assertEqual(self.Metrics.search_count([("channel_id", "=", self.channel.id)]), 2)

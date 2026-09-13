@@ -61,7 +61,16 @@ class TestWoovi(TransactionCase):
             "expiresDate": "2099-01-01T00:00:00.000Z",
         }
         charge.update(extra)
-        return {"charge": charge}
+        return {"charge": {key: value for key, value in charge.items() if value is not None}}
+
+    def _remote(self, status="COMPLETED", **extra):
+        """Status REAL da cobrança na API: o webhook é só gatilho e é sempre reconferido."""
+        self._mock_api(
+            {
+                "/charge/": lambda t: self._charge(t, status=status, **extra),
+                "/charge": lambda t: self._charge(t),
+            }
+        )
 
     def _with_charge(self, tx=None):
         tx = tx or self.tx
@@ -130,14 +139,37 @@ class TestWoovi(TransactionCase):
     # ----- eventos -----
     def test_completed_with_value_confirms(self):
         self._with_charge()
+        self._remote("COMPLETED")
         event, created = self.Event._ingest_payload(self._completed())
         self.assertTrue(created)
         self.assertEqual(event.state, "done")
         self.assertEqual(self.tx.state, "done")
         self.assertEqual(self.tx.woovi_paid_cents, 1050)
 
+    def test_webhook_status_comes_from_api_not_payload(self):
+        # Assinatura Woovi é global: um "pago" assinado por OUTRA conta não confirma se
+        # a cobrança desta transação ainda está ativa na API.
+        self._with_charge()
+        self._remote("ACTIVE")
+        self.Event._ingest_payload(self._completed())
+        self.assertEqual(self.tx.state, "pending")
+        self.assertEqual(self.tx.woovi_paid_cents, 0)
+        self.assertIn("GET", [call[0] for call in self.api_calls])
+
+    def test_webhook_for_another_charge_is_rejected(self):
+        self._with_charge()
+        self._remote("COMPLETED")
+        payload = self._completed()
+        payload["charge"]["identifier"] = "CH-DE-OUTRA-CONTA"
+        calls_before = len(self.api_calls)
+        event, _created = self.Event._ingest_payload(payload)
+        self.assertEqual(event.state, "rejected")
+        self.assertEqual(len(self.api_calls), calls_before, "nem consulta a API")
+        self.assertEqual(self.tx.state, "pending")
+
     def test_duplicate_event_has_single_effect(self):
         self._with_charge()
+        self._remote("COMPLETED")
         self.Event._ingest_payload(self._completed())
         _event, created = self.Event._ingest_payload(self._completed())
         self.assertFalse(created)
@@ -145,30 +177,31 @@ class TestWoovi(TransactionCase):
 
     def test_missing_value_does_not_confirm(self):
         self._with_charge()
-        payload = self._completed(pix=None)
-        payload["charge"].pop("value")
-        event, _created = self.Event._ingest_payload(payload)
+        self._remote("COMPLETED", value=None)
+        event, _created = self.Event._ingest_payload(self._completed(pix=None))
         self.assertEqual(event.state, "failed")
         self.assertIn("ausente", event.error)
         self.assertEqual(self.tx.state, "pending")
 
     def test_value_mismatch_is_rejected(self):
         self._with_charge()
+        self._remote("COMPLETED", value=999)
         event, _created = self.Event._ingest_payload(self._completed(pix={"value": 999}))
         self.assertEqual(event.state, "rejected")
         self.assertEqual(self.tx.state, "error")
 
     def test_currency_mismatch_is_rejected(self):
         self._with_charge()
-        payload = self._completed()
-        payload["charge"]["currency"] = "USD"
-        event, _created = self.Event._ingest_payload(payload)
+        self._remote("COMPLETED", currency="USD")
+        event, _created = self.Event._ingest_payload(self._completed())
         self.assertEqual(event.state, "rejected")
         self.assertNotEqual(self.tx.state, "done")
 
     def test_out_of_order_expired_after_completed_is_ignored(self):
         self._with_charge()
+        self._remote("COMPLETED")
         self.Event._ingest_payload(self._completed())
+        self._remote("EXPIRED")
         late, _created = self.Event._ingest_payload(
             {
                 "event": "OPENPIX:CHARGE_EXPIRED",
@@ -180,6 +213,7 @@ class TestWoovi(TransactionCase):
 
     def test_expired_event_cancels_pending(self):
         self._with_charge()
+        self._remote("EXPIRED")
         self.Event._ingest_payload(
             {
                 "event": "OPENPIX:CHARGE_EXPIRED",
@@ -191,7 +225,9 @@ class TestWoovi(TransactionCase):
 
     def test_refund_is_recorded(self):
         self._with_charge()
+        self._remote("COMPLETED")
         self.Event._ingest_payload(self._completed())
+        self._remote("REFUNDED")
         refund, _created = self.Event._ingest_payload(
             {
                 "event": "OPENPIX:TRANSACTION_REFUND_RECEIVED",
@@ -220,6 +256,7 @@ class TestWoovi(TransactionCase):
 
     def test_pending_event_is_retried_by_cron(self):
         self._with_charge()
+        self._remote("COMPLETED")
         original = type(self.Tx)._woovi_apply_payment_data
 
         def _flaky(tx, data):

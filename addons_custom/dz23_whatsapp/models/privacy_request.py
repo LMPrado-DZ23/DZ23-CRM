@@ -196,9 +196,7 @@ class DZ23PrivacyRequest(models.TransientModel):
             )
             inbox._dz23_anonymize(ERASED)
             outbox._dz23_anonymize(ERASED)
-            media = Media.search([("inbox_id", "in", inbox.ids)])
-            media.attachment_id.unlink()
-            media.write({"status": "expired", "attachment_id": False})
+            Media.search([("inbox_id", "in", inbox.ids)])._dz23_purge_files()
             for identifier in identifiers | {contact.provider_user_id}:
                 Suppression._add(self.company_id, identifier, "erasure")
             conversation = Conversation.search([("contact_id", "=", contact.id)], limit=1)
