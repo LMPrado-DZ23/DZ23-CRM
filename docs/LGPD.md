@@ -16,7 +16,12 @@ dados; a DZ23, ao operar o SaaS, atua como **operadora**.
 | Texto enviado a IA externa | Resposta automática | Só com consentimento/base registrada pela empresa (política por empresa) |
 | Auditoria de acesso | Segurança e prestação de contas | Legítimo interesse / art. 46 |
 
-## 2. Retenção (padrões, ajustáveis por empresa em Ajustes → DZ23 WhatsApp)
+## 2. Retenção
+
+Onde ajustar: **mensagens, status e auditoria** por empresa em Ajustes → DZ23 WhatsApp;
+**anexos** no mesmo lugar, mas o prazo é **global** (todas as empresas); **textos da fila
+de IA** e **uso de IA** pelos parâmetros de sistema `dz23.ai.request_retention_days` e
+`dz23.ai.usage_retention_days` (modo desenvolvedor).
 
 | Dado | Prazo padrão | O que acontece |
 |---|---|---|
@@ -33,6 +38,10 @@ dados; a DZ23, ao operar o SaaS, atua como **operadora**.
 A rotina roda diariamente (cron "DZ23: retenção e anonimização (LGPD)") em lotes; itens
 ainda na fila nunca são tocados.
 
+**Pseudonimização, não anonimização irreversível:** o telefone vira um pseudônimo
+HMAC-SHA256 por empresa, cuja chave é o segredo do banco. Quem tem o banco e esse segredo
+pode reidentificar números por força bruta; trate o banco e os backups como dado pessoal.
+
 ## 3. Direitos do titular (art. 18)
 
 Menu **Atendimento → Pedido do titular (LGPD)** (supervisor) ou **DZ23 WhatsApp →
@@ -44,9 +53,12 @@ Pedido do titular** (administrador):
    textos enviados à IA. Entregue ao titular por canal seguro e **não reenvie** o
    arquivo por e-mail aberto; ele expira no servidor em 7 dias.
 3. **Anonimizar titular** — eliminação quando legalmente possível: informe o protocolo,
-   confirme. Remove textos, anexos, notas, dados de contato do lead e textos de IA;
-   cancela envios pendentes; bloqueia a conversa; registra supressão. **Mantém**
-   pedidos, faturas e pagamentos (obrigação legal) — informe isso ao titular.
+   confirme. Remove textos, anexos (inclusive a cópia no lead), notas, prévias dos
+   eventos de status, histórico de alterações, dados de contato do lead e do cliente
+   (telefone/e-mail) e textos de IA; cancela envios pendentes; bloqueia a conversa;
+   registra supressão. O **nome** do cliente só é removido se não houver pedido
+   confirmado nem fatura. **Mantém** pedidos, faturas e pagamentos (obrigação legal) —
+   informe isso ao titular.
 4. Correção de dados cadastrais: pelo próprio parceiro/lead no Odoo.
 
 Todo pedido fica na **Auditoria de acesso** (quem, quando, quantos contatos — sem

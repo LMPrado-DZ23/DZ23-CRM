@@ -16,7 +16,7 @@
                         </setting>
                     </block>
                     <block title="Privacidade e retenção (LGPD)"
-                           help="Prazos da empresa atual. Pedidos, faturas e pagamentos nunca são apagados por estas regras.">
+                           help="Mensagens, status e auditoria: prazos da EMPRESA ATUAL. Anexos: prazo GLOBAL (todas as empresas). Pedidos, faturas e pagamentos nunca são apagados por estas regras.">
                         <setting string="Mensagens"
                                  help="Texto, legenda, payload e telefone de mensagens finalizadas são anonimizados após o prazo. 0 = não anonimizar.">
                             <field name="dz23_message_retention_days"/>
@@ -24,7 +24,7 @@
                         <setting string="Payload dos status" help="Prévia do payload dos eventos de entrega/leitura.">
                             <field name="dz23_event_retention_days"/>
                         </setting>
-                        <setting string="Anexos recebidos" help="Arquivos baixados do WhatsApp.">
+                        <setting string="Anexos recebidos (global)" help="Arquivos baixados do WhatsApp, em todas as empresas.">
                             <field name="dz23_media_retention_days"/>
                         </setting>
                         <setting string="Auditoria de acesso">

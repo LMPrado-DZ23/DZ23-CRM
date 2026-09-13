@@ -27,6 +27,8 @@ def _too_many(events):
 
 
 def _too_large():
+    # Limita também corpo sem Content-Length (chunked): a leitura do stream para no teto.
+    request.httprequest.max_content_length = _MAX_BODY
     return (request.httprequest.content_length or 0) > _MAX_BODY
 
 

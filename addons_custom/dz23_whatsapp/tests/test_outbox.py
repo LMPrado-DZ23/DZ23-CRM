@@ -41,6 +41,27 @@ class TestMessageOutbox(TransactionCase):
         self.assertEqual(rec.status, "sent")
         self.assertEqual(rec.provider_message_id, "X")
 
+    def test_status_callback_before_send_commit_is_applied(self):
+        # Auditoria A-2: o "entregue" chegou antes de a outbox gravar o id do provedor.
+        self.env["dz23.message.event"]._record(
+            self.channel,
+            {
+                "provider": "evolution",
+                "provider_message_id": "EARLY-ACK-1",
+                "direction": "outbound",
+                "status": "delivered",
+                "provider_status": "DELIVERY_ACK",
+                "occurred_at": fields.Datetime.now(),
+                "payload": {},
+            },
+        )
+        rec = self.Outbox._enqueue(self.channel, "5561999990000", "oi")
+        with patch(_SEND, return_value={"key": {"id": "EARLY-ACK-1"}}):
+            rec._process_one()
+        self.assertEqual(rec.status, "sent")
+        self.assertEqual(rec.current_status, "delivered")
+        self.assertTrue(rec.event_ids.processed)
+
     def test_provider_accept_without_message_id_is_not_sent(self):
         # 2xx sem id de mensagem não prova o envio: fica em retry (nunca "sent").
         rec = self.Outbox._enqueue(self.channel, "5561999990000", "oi")

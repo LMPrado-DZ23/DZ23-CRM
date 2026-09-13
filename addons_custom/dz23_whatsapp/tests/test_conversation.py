@@ -96,6 +96,68 @@ class TestConversation(TransactionCase):
         self._inbound(self.channel, "R-3")
         self.assertEqual(conversation.state, "blocked")
 
+    def test_waiting_customer_answer_returns_to_attendant(self):
+        # Auditoria C-4: resposta do cliente volta para quem pediu, não para o robô.
+        conversation = self._inbound(self.channel, "W-1").conversation_id
+        conversation.with_user(self.attendant).action_take()
+        conversation.action_wait_customer()
+        self._inbound(self.channel, "W-2", text="segue o documento")
+        self.assertEqual(conversation.state, "human_active")
+        self.assertFalse(conversation.bot_can_reply())
+
+    def test_plain_user_cannot_read_contacts_or_compose(self):
+        # Auditoria B-4: contato e composição de WhatsApp só para Atendente.
+        contact = self._inbound(self.channel, "U-1").conversation_id.contact_id
+        plain = self.env["res.users"].create(
+            {
+                "name": "Usuário comum",
+                "login": "comum_contatos_qa12",
+                "company_id": self.company_a.id,
+                "company_ids": [(6, 0, [self.company_a.id])],
+                "group_ids": [(6, 0, [self.env.ref("base.group_user").id])],
+            }
+        )
+        with self.assertRaises(AccessError):
+            contact.with_user(plain).read(["provider_user_id"])
+        with self.assertRaises(AccessError):
+            self.env["dz23.whatsapp.compose"].with_user(plain).create({})
+
+    def test_release_to_bot_requires_autoreply(self):
+        self.channel_b.agent_autoreply = False
+        conversation = self._inbound(self.channel_b, "RB-1").conversation_id
+        conversation.action_take()
+        with self.assertRaises(UserError):
+            conversation.action_release_to_bot()
+
+    def test_reply_wizard_refuses_templates_that_would_fail(self):
+        # Auditoria C-6: opt-out e número de variáveis são conferidos antes de enfileirar.
+        conversation = self._inbound(self.meta, "TPL-1", number="5561977770009").conversation_id
+        template = self.env["dz23.message.template"].create(
+            {
+                "channel_id": self.meta.id,
+                "name": "boas_vindas_qa12",
+                "body": "Olá {{1}}, tudo bem?",
+                "status": "approved",
+            }
+        )
+        Reply = self.env["dz23.conversation.reply"].with_user(self.attendant)
+        wrong_count = Reply.create(
+            {"conversation_id": conversation.id, "template_id": template.id, "template_params": ""}
+        )
+        with self.assertRaises(UserError):
+            wrong_count.action_send()
+        conversation.opt_out = True
+        opted_out = Reply.create(
+            {
+                "conversation_id": conversation.id,
+                "template_id": template.id,
+                "template_params": "Ana",
+            }
+        )
+        with self.assertRaises(UserError):
+            opted_out.action_send()
+        self.assertFalse(self.Outbox.search([("conversation_id", "=", conversation.id)]))
+
     def test_take_and_release(self):
         conversation = self._inbound(self.channel, "T-1").conversation_id
         conversation.with_user(self.attendant).action_take()

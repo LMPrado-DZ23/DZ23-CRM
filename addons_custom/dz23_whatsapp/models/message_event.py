@@ -92,6 +92,9 @@ class DZ23MessageEvent(models.Model):
     _MUTABLE_FIELDS = frozenset({"processed", "outbox_id", "inbox_id"})
     # Só a política de retenção (ADR-013) limpa estes campos, e só limpa.
     _RETENTION_FIELDS = frozenset({"payload_preview", "error_message"})
+    # Status de envio que chega antes do commit do id do provedor na outbox fica
+    # pendente por este tempo (aplicado quando a outbox grava o id ou pelo cron).
+    _UNMATCHED_GRACE_MINUTES = 15
 
     channel_id = fields.Many2one(
         "dz23.channel", required=True, ondelete="cascade", index=True, readonly=True
@@ -99,25 +102,41 @@ class DZ23MessageEvent(models.Model):
     company_id = fields.Many2one(
         related="channel_id.company_id", store=True, index=True, readonly=True
     )
-    provider = fields.Char(required=True, readonly=True)
-    provider_message_id = fields.Char(required=True, index=True, readonly=True)
+    provider = fields.Char("Provedor", required=True, readonly=True)
+    provider_message_id = fields.Char("Id no provedor", required=True, index=True, readonly=True)
     message_direction = fields.Selection(
-        [("inbound", "Recebida"), ("outbound", "Enviada")], required=True, readonly=True
+        [("inbound", "Recebida"), ("outbound", "Enviada")],
+        string="Direção",
+        required=True,
+        readonly=True,
     )
-    status = fields.Selection(MESSAGE_STATUSES, required=True, index=True, readonly=True)
-    provider_status = fields.Char(readonly=True, help="Status original do provedor.")
-    occurred_at = fields.Datetime(readonly=True, help="Quando o provedor diz que ocorreu.")
-    received_at = fields.Datetime(default=fields.Datetime.now, readonly=True)
-    payload_hash = fields.Char(readonly=True)
-    payload_preview = fields.Text(readonly=True)
-    error_code = fields.Char(readonly=True)
-    error_message = fields.Char(readonly=True)
-    outbox_id = fields.Many2one("dz23.message.outbox", ondelete="set null", readonly=True)
-    inbox_id = fields.Many2one("dz23.message.inbox", ondelete="set null", readonly=True)
+    status = fields.Selection(
+        MESSAGE_STATUSES, string="Status", required=True, index=True, readonly=True
+    )
+    provider_status = fields.Char(
+        "Status do provedor", readonly=True, help="Status original do provedor."
+    )
+    occurred_at = fields.Datetime(
+        "Ocorreu em", readonly=True, help="Quando o provedor diz que ocorreu."
+    )
+    received_at = fields.Datetime("Recebido em", default=fields.Datetime.now, readonly=True)
+    payload_hash = fields.Char("Hash do payload", readonly=True)
+    payload_preview = fields.Text("Prévia do payload", readonly=True)
+    error_code = fields.Char("Código de erro", readonly=True)
+    error_message = fields.Char("Mensagem de erro", readonly=True)
+    outbox_id = fields.Many2one(
+        "dz23.message.outbox", "Mensagem enviada", ondelete="set null", readonly=True
+    )
+    inbox_id = fields.Many2one(
+        "dz23.message.inbox", "Mensagem recebida", ondelete="set null", readonly=True
+    )
     correlation_id = fields.Char(
-        index=True, readonly=True, help="Correlation id devolvido pelo provedor (Meta)."
+        "Id de correlação",
+        index=True,
+        readonly=True,
+        help="Correlation id devolvido pelo provedor (Meta).",
     )
-    processed = fields.Boolean(default=False, readonly=True)
+    processed = fields.Boolean("Aplicado", default=False, readonly=True)
 
     _dedupe_uniq = models.Constraint(
         "unique(channel_id, provider_message_id, message_direction, status)",
@@ -125,6 +144,7 @@ class DZ23MessageEvent(models.Model):
     )
     _company_status_idx = models.Index("(company_id, status)")
     _channel_provider_msg_idx = models.Index("(channel_id, provider_message_id)")
+    _channel_received_idx = models.Index("(channel_id, received_at)")
     _outbox_occurred_idx = models.Index("(outbox_id, occurred_at)")
     _pending_idx = models.Index("(id) WHERE processed IS NOT TRUE")
 
@@ -248,4 +268,14 @@ class DZ23MessageEvent(models.Model):
                         error_code=ev.error_code,
                         error_message=ev.error_message,
                     )
+            grace_start = fields.Datetime.subtract(
+                fields.Datetime.now(), minutes=self._UNMATCHED_GRACE_MINUTES
+            )
+            if (
+                not outbox
+                and ev.message_direction == "outbound"
+                and ev.received_at
+                and ev.received_at > grace_start
+            ):
+                continue  # corrida com o commit do envio: tenta de novo depois
             ev.write({"processed": True, "outbox_id": outbox.id or False})

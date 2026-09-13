@@ -1,7 +1,10 @@
 # Identidade de conversa POR CANAL: liga o identificador do usuário no provedor
 # (provider_user_id, ex. o número E.164 no WhatsApp) a um lead/parceiro, SEMPRE
 # no escopo do canal e da empresa. Substitui a busca global por cauda de telefone.
+import psycopg2
 from odoo import api, fields, models
+from odoo.exceptions import UserError
+from odoo.tools.translate import _
 
 
 class DZ23ChannelContact(models.Model):
@@ -34,18 +37,32 @@ class DZ23ChannelContact(models.Model):
     @api.model
     def _get_or_create(self, channel, provider_user_id, phone_e164=None):
         """Acha/cria a identidade escopada ao canal (nunca busca global)."""
-        rec = self.search(
-            [("channel_id", "=", channel.id), ("provider_user_id", "=", provider_user_id)], limit=1
-        )
+        domain = [("channel_id", "=", channel.id), ("provider_user_id", "=", provider_user_id)]
+        rec = self.search(domain, limit=1)
         if rec:
             return rec
-        return self.create(
-            {
-                "channel_id": channel.id,
-                "provider_user_id": provider_user_id,
-                "phone_e164": phone_e164 or provider_user_id,
-            }
-        )
+        # Dois webhooks simultâneos do mesmo contato novo: o segundo INSERT viola a
+        # unicidade; sem savepoint a transação inteira (e a mensagem) seria perdida.
+        try:
+            with self.env.cr.savepoint():
+                return self.create(
+                    {
+                        "channel_id": channel.id,
+                        "provider_user_id": provider_user_id,
+                        "phone_e164": phone_e164 or provider_user_id,
+                    }
+                )
+        except psycopg2.IntegrityError:
+            return self.search(domain, limit=1)
+
+    def write(self, vals):
+        if "channel_id" in vals and any(
+            contact.channel_id.id != vals["channel_id"] for contact in self
+        ):
+            raise UserError(
+                _("O canal de um contato não pode ser alterado (isolamento entre empresas).")
+            )
+        return super().write(vals)
 
     @api.model
     def _touch_inbound(self, channel, number, when=None):

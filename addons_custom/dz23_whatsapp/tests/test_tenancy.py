@@ -49,6 +49,38 @@ class TestChannelTenancy(TransactionCase):
             self.chB.evo_instance = "inst_dup"
             self.chB.flush_recordset()
 
+    def test_contact_channel_cannot_move_to_other_company(self):
+        # Auditoria B-5: trocar o canal mudaria a empresa (e vazaria a conversa).
+        from odoo.exceptions import UserError
+
+        contact = self.env["dz23.channel.contact"]._get_or_create(self.chA, "5561900005555")
+        with self.assertRaises(UserError):
+            contact.write({"channel_id": self.chB.id})
+        conversation = self.env["dz23.conversation"]._for_contact(contact)
+        other = self.env["dz23.channel.contact"]._get_or_create(self.chB, "5561900005555")
+        with self.assertRaises(UserError):
+            conversation.write({"contact_id": other.id})
+
+    def test_get_or_create_survives_concurrent_insert(self):
+        # Auditoria A-4: o outro webhook já inseriu o contato (a busca não o viu).
+        Contact = self.env["dz23.channel.contact"]
+        existing = Contact._get_or_create(self.chA, "5561900004444")
+        original_search = type(Contact).search
+        calls = {"n": 0}
+
+        def _stale_first_search(records, domain, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return records.browse()
+            return original_search(records, domain, *args, **kwargs)
+
+        self.patch(type(Contact), "search", _stale_first_search)
+        from odoo.tools import mute_logger
+
+        # A violação de unicidade é o cenário testado: o Postgres a registra como "bad query".
+        with mute_logger("odoo.sql_db"):
+            self.assertEqual(Contact._get_or_create(self.chA, "5561900004444"), existing)
+
     def test_same_phone_suffix_distinct_identities(self):
         # Mesmo número em canais/empresas diferentes => identidades DISTINTAS,
         # cada uma escopada ao seu canal/empresa (sem colisão global).
@@ -59,7 +91,8 @@ class TestChannelTenancy(TransactionCase):
         self.assertNotEqual(cA.id, cB.id)
         self.assertEqual(cA.company_id, self.cA)
         self.assertEqual(cB.company_id, self.cB)
-        # usuário de A não enxerga a identidade de B
+        # atendente de A (contatos são só do grupo Atendente) não enxerga a identidade de B
+        self.userA.group_ids = [(4, self.env.ref("dz23_whatsapp.group_dz23_attendant").id)]
         visiveis = Contact.with_user(self.userA).search([("provider_user_id", "=", num)])
         self.assertIn(cA, visiveis)
         self.assertNotIn(cB, visiveis)

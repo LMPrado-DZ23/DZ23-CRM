@@ -186,6 +186,7 @@ class DZ23PrivacyRequest(models.TransientModel):
             raise UserError(_("Nenhum contato com este telefone nesta empresa."))
         Conversation = self.env["dz23.conversation"].sudo()
         Media = self.env["dz23.message.media"].sudo()
+        Event = self.env["dz23.message.event"].sudo()
         Suppression = self.env["dz23.privacy.suppression"]
         identifiers = self._identifiers()
         erased_body = "<p>%s</p>" % ERASED
@@ -199,10 +200,19 @@ class DZ23PrivacyRequest(models.TransientModel):
             Media.search([("inbox_id", "in", inbox.ids)])._dz23_purge_files()
             for identifier in identifiers | {contact.provider_user_id}:
                 Suppression._add(self.company_id, identifier, "erasure")
+            events = Event.search(
+                ["|", ("outbox_id", "in", outbox.ids), ("inbox_id", "in", inbox.ids)]
+            )
+            events.with_context(dz23_retention=True).write(
+                {"payload_preview": False, "error_message": False}
+            )
             conversation = Conversation.search([("contact_id", "=", contact.id)], limit=1)
             if conversation:
                 conversation.message_ids.filtered("body").write({"body": erased_body})
-                conversation.write(
+                self.env["mail.tracking.value"].sudo().search(
+                    [("mail_message_id", "in", conversation.message_ids.ids)]
+                ).unlink()
+                conversation.with_context(tracking_disable=True).write(
                     {
                         "opt_out": True,
                         "state": "blocked",

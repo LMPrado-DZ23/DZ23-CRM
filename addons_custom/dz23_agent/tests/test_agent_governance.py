@@ -4,6 +4,7 @@
 # regras fixas no prompt e histórico só para IA local; retenção dos textos.
 import uuid
 from datetime import timedelta
+from unittest.mock import patch
 
 from odoo import fields
 from odoo.addons.dz23_ai.models.ai_service import AICircuitOpenError
@@ -62,6 +63,18 @@ class TestAgentGovernance(TransactionCase):
         self.assertIn("equipe", self._replies()[0])
         self.channel.handle_inbound(self.number, "alô?")
         self.assertEqual(len(self._replies()), 1, "transferida: o robô fica em silêncio")
+
+    def test_handoff_keeps_sla_running_and_schedules_activity(self):
+        # Auditoria C-5: a mensagem automática de transferência não zera o SLA.
+        self.channel.agenda_user_id = self.env.user
+        self.channel.handle_inbound(self.number, "quero falar com um atendente")
+        conversation = self._conversation()
+        self.assertTrue(conversation.first_response_due_at)
+        self.assertTrue(conversation.activity_ids)
+        with patch.object(type(self.channel), "send_text", return_value={"key": {"id": "HO-1"}}):
+            self.Outbox._cron_process()
+        self.assertTrue(self._replies())
+        self.assertTrue(conversation.first_response_due_at, "SLA segue até um humano responder")
 
     def test_cancel_appointment_stays_with_bot(self):
         self.channel.handle_inbound(self.number, "quero cancelar meu agendamento")

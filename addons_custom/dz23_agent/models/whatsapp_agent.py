@@ -115,7 +115,8 @@ class DZ23ChannelAgent(models.Model):
     def _agent_contact(self, number):
         self.ensure_one()
         e164 = _e164_br(number) or _digits(number)
-        contact = self.env["dz23.channel.contact"]._get_or_create(self, e164, e164)
+        # Contatos são restritos ao grupo Atendente; o worker do robô usa sudo.
+        contact = self.env["dz23.channel.contact"].sudo()._get_or_create(self, e164, e164)
         if not contact.lead_id:
             lead = self.env["crm.lead"].create(
                 {
@@ -130,11 +131,14 @@ class DZ23ChannelAgent(models.Model):
         return contact
 
     def _agent_find_lead(self, number):
-        return self._agent_contact(number).lead_id
+        # O contato vem com sudo; o lead volta ao usuário do robô (sujeito às regras).
+        return self._agent_contact(number).lead_id.with_env(self.env)
 
     def _agent_contact_for_lead(self, lead):
-        return self.env["dz23.channel.contact"].search(
-            [("channel_id", "=", self.id), ("lead_id", "=", lead.id)], limit=1
+        return (
+            self.env["dz23.channel.contact"]
+            .sudo()
+            .search([("channel_id", "=", self.id), ("lead_id", "=", lead.id)], limit=1)
         )
 
     def _agent_partner_for(self, lead):
@@ -154,6 +158,16 @@ class DZ23ChannelAgent(models.Model):
         """Advisory lock transacional (liberado no commit/rollback do item)."""
         key = ":".join(str(p) for p in ("dz23", self.company_id.id, *parts))
         self.env.cr.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
+
+    def _agent_agenda_lock(self):
+        """Lock da agenda com o MESMO alcance da checagem de conflito: sempre o da empresa
+        (todos os eventos das oportunidades dela) e, havendo responsável, o da agenda dele
+        (que pode ter eventos de outras empresas). Ordem fixa: empresa → responsável."""
+        self.ensure_one()
+        self._agent_lock("agenda")
+        if self.agenda_user_id:
+            key = "dz23:agenda-user:%s" % self.agenda_user_id.id
+            self.env.cr.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
 
     # ---- contexto do negócio (escopado por empresa) ----
     def _agent_catalog(self, limit=40):
@@ -452,7 +466,7 @@ class DZ23ChannelAgent(models.Model):
         message = message or {}
         mtype = message.get("message_type") or "text"
         contact = self._agent_contact(number)
-        lead = contact.lead_id
+        lead = contact.lead_id.with_env(self.env)
         conversation = self.env["dz23.conversation"].sudo()._for_contact(contact)
         if not self.agent_autoreply or not conversation.bot_can_reply():
             # Robô desligado ou humano no controle (ADR-010): só registra no lead —
@@ -578,7 +592,7 @@ class DZ23ChannelAgent(models.Model):
         stop_utc = start_utc + timedelta(minutes=minutes)
         if not self._agent_within_working_hours(start_utc, stop_utc):
             raise _SlotUnavailableError("closed")
-        self._agent_lock("agenda", self.agenda_user_id.id or "canal-%s" % self.id)
+        self._agent_agenda_lock()
         if self._agent_slot_conflict(start_utc, minutes, exclude_event=exclude_event):
             raise _SlotUnavailableError("busy")
         return self._agent_create_event(lead, start_utc, minutes)
@@ -649,7 +663,7 @@ class DZ23ChannelAgent(models.Model):
         )
 
     def _handle_cancel_schedule(self, lead, correlation_id=None):
-        self._agent_lock("agenda", self.agenda_user_id.id or "canal-%s" % self.id)
+        self._agent_agenda_lock()
         event = self._agent_future_event(lead)
         if not event:
             return _("Não encontrei nenhum agendamento futuro no seu nome 🤔 Quer marcar um?")

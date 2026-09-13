@@ -42,18 +42,21 @@ class DZ23AIBreaker(models.Model):
     _description = "DZ23 — Circuit breaker de provedor de IA (por empresa)"
     _order = "company_id, provider"
 
-    company_id = fields.Many2one("res.company", required=True, ondelete="cascade", index=True)
-    provider = fields.Char(required=True)
+    company_id = fields.Many2one(
+        "res.company", "Empresa", required=True, ondelete="cascade", index=True
+    )
+    provider = fields.Char("Provedor", required=True)
     state = fields.Selection(
         [("closed", "Fechado (normal)"), ("open", "Aberto (bloqueado)"), ("half_open", "Teste")],
+        string="Estado",
         default="closed",
         required=True,
     )
-    failure_count = fields.Integer(default=0)
-    open_until = fields.Datetime()
-    last_error = fields.Char()
-    last_failure_at = fields.Datetime()
-    last_success_at = fields.Datetime()
+    failure_count = fields.Integer("Falhas seguidas", default=0)
+    open_until = fields.Datetime("Bloqueado até")
+    last_error = fields.Char("Último erro")
+    last_failure_at = fields.Datetime("Última falha")
+    last_success_at = fields.Datetime("Último sucesso")
 
     _breaker_uniq = models.Constraint(
         "unique(company_id, provider)", "Já existe breaker para esta empresa/provedor."
@@ -72,19 +75,34 @@ class DZ23AIBreaker(models.Model):
         except psycopg2.IntegrityError:
             return Breaker.search(domain, limit=1)
 
+    def _lock(self):
+        """Lock de linha (no cursor de governança): chamadas concorrentes não perdem
+        contagem de falhas nem liberam vários testes ao mesmo tempo."""
+        self.env.cr.execute("SELECT id FROM dz23_ai_breaker WHERE id = %s FOR UPDATE", (self.id,))
+        self.invalidate_recordset()
+
     def _acquire(self):
         """True se a chamada pode sair. Não levanta: roda no cursor de governança, que
-        precisa terminar com commit (ver `dz23.ai._governance`)."""
+        precisa terminar com commit (ver `dz23.ai._governance`). Depois do cooldown, UMA
+        chamada de teste (half-open) passa por janela; as outras esperam o resultado."""
         self.ensure_one()
-        if self.state != "open":
+        self._lock()
+        if self.state == "closed":
             return True
-        if self.open_until and self.open_until > fields.Datetime.now():
+        now = fields.Datetime.now()
+        if self.open_until and self.open_until > now:
             return False
-        self.state = "half_open"  # janela de teste: a próxima chamada decide
+        self.write(
+            {
+                "state": "half_open",
+                "open_until": now + timedelta(seconds=_BREAKER_COOLDOWN_SECONDS),
+            }
+        )
         return True
 
     def _record_failure(self, retry_after=None, error=None):
         self.ensure_one()
+        self._lock()
         count = self.failure_count + 1
         now = fields.Datetime.now()
         vals = {"failure_count": count, "last_failure_at": now, "last_error": error or False}
@@ -96,6 +114,7 @@ class DZ23AIBreaker(models.Model):
 
     def _record_success(self):
         self.ensure_one()
+        self._lock()
         if self.state != "closed" or self.failure_count:
             self.write({"state": "closed", "failure_count": 0, "open_until": False})
         self.last_success_at = fields.Datetime.now()
@@ -106,8 +125,10 @@ class DZ23AIUsage(models.Model):
     _description = "DZ23 — Uso de IA (tokens, custo, duração)"
     _order = "id desc"
 
-    company_id = fields.Many2one("res.company", required=True, ondelete="cascade", index=True)
-    provider = fields.Char(required=True, index=True)
+    company_id = fields.Many2one(
+        "res.company", "Empresa", required=True, ondelete="cascade", index=True
+    )
+    provider = fields.Char("Provedor", required=True, index=True)
     model_name = fields.Char("Modelo")
     purpose = fields.Char("Finalidade", index=True)
     status = fields.Selection(
@@ -117,14 +138,15 @@ class DZ23AIUsage(models.Model):
             ("rate_limited", "Limitado (429)"),
             ("blocked", "Bloqueado por limite"),
         ],
+        string="Resultado",
         required=True,
         index=True,
     )
-    input_tokens = fields.Integer()
-    output_tokens = fields.Integer()
+    input_tokens = fields.Integer("Tokens de entrada")
+    output_tokens = fields.Integer("Tokens de saída")
     cost_usd = fields.Float("Custo estimado (US$)", digits=(12, 6))
-    duration_ms = fields.Integer()
-    error = fields.Char()
+    duration_ms = fields.Integer("Duração (ms)")
+    error = fields.Char("Erro")
 
     _company_date_idx = models.Index("(company_id, create_date)")
 
@@ -154,7 +176,7 @@ class DZ23AIUsage(models.Model):
         if days <= 0:
             return 0
         cutoff = fields.Datetime.subtract(fields.Datetime.now(), days=days)
-        old = self.sudo().search([("create_date", "<", cutoff)])
+        old = self.sudo().search([("create_date", "<", cutoff)], limit=5000)
         count = len(old)
         old.unlink()
         return count

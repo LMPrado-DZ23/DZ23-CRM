@@ -41,6 +41,8 @@ def _verify_woovi_signature(raw_body, signature_b64, pubkey_pem):
 class WooviController(http.Controller):
     @http.route("/payment/woovi/webhook", type="http", auth="public", methods=["POST"], csrf=False)
     def woovi_webhook(self, **_kwargs):
+        # Limita também corpo sem Content-Length (chunked).
+        request.httprequest.max_content_length = _MAX_BODY
         if (request.httprequest.content_length or 0) > _MAX_BODY:
             return request.make_response("payload too large", status=413)
         raw = request.httprequest.get_data() or b""

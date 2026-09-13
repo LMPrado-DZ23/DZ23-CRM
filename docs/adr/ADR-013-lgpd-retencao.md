@@ -39,6 +39,11 @@ eliminação de um titular, nem saber quem abriu uma conversa.
 - Anonimização por retenção e pedido do titular **não alcança backups**: o runbook
   [`backup_restore.md`](../runbooks/backup_restore.md) define rotação e o
   procedimento de reaplicar anonimizações após uma restauração.
+- O pseudônimo HMAC usa o segredo do banco: é **pseudonimização** (reversível por força
+  bruta para quem tem banco + segredo), não anonimização irreversível. Uma chave fora do
+  banco (cofre) é a evolução natural.
+- Auditoria final (B-2/B-3): a anonimização passou a remover também a cópia do anexo no
+  lead, prévias dos eventos de status, valores rastreados e telefone/e-mail do cliente.
 - A auditoria é append-only no ORM, mas um DBA ainda pode alterá-la; trilha
   imutável (WORM/assinada) exige infraestrutura externa e fica fora desta fase.
 - A sincronização padrão do CRM pode limpar telefone/e-mail do parceiro vinculado ao

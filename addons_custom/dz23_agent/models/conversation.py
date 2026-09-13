@@ -1,5 +1,7 @@
 # Conversa de atendimento ligada ao CRM: lead do contato, busca por pedido de venda e
 # transferência do robô para humano (ADR-011).
+from datetime import timedelta
+
 from odoo import api, fields, models
 from odoo.tools.translate import _
 
@@ -29,7 +31,8 @@ class DZ23ConversationCrm(models.Model):
     handoff_at = fields.Datetime("Transferida em", readonly=True)
 
     def _agent_handoff(self, reason):
-        """Robô passa a conversa para um humano: fica em silêncio até alguém devolver."""
+        """Robô passa a conversa para um humano: fica em silêncio até alguém devolver.
+        O SLA de 1ª resposta humana começa agora e o responsável recebe uma atividade."""
         label = dict(HANDOFF_REASONS)[reason]
         now = fields.Datetime.now()
         for conversation in self:
@@ -39,10 +42,22 @@ class DZ23ConversationCrm(models.Model):
                 "handoff_at": now,
                 "bot_turns": 0,
             }
+            minutes = conversation.channel_id.sla_first_response_minutes or 0
+            if minutes:
+                vals.update(first_response_due_at=now + timedelta(minutes=minutes))
+                vals.update(sla_breached=False)
             if reason == "sensitive" and conversation.priority == "0":
                 vals["priority"] = "1"
             conversation.write(vals)
             conversation._note(_("Robô transferiu para atendimento humano: %s.") % label)
+            responsible = conversation.user_id or conversation.channel_id.agenda_user_id
+            if responsible:
+                conversation.activity_schedule(
+                    "mail.mail_activity_data_todo",
+                    summary=_("Atender conversa transferida pelo robô"),
+                    note=label,
+                    user_id=responsible.id,
+                )
         return True
 
     def action_take(self):

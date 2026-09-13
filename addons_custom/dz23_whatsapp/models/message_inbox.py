@@ -43,10 +43,10 @@ class DZ23MessageInbox(models.Model):
     conversation_id = fields.Many2one(
         "dz23.conversation", ondelete="set null", index=True, readonly=True
     )
-    provider = fields.Char(index=True)
-    message_id = fields.Char(required=True, index=True)
-    sender = fields.Char(help="provider_user_id / número E.164")
-    text = fields.Text()
+    provider = fields.Char("Provedor", index=True)
+    message_id = fields.Char("Id da mensagem", required=True, index=True)
+    sender = fields.Char("Remetente", help="provider_user_id / número E.164")
+    text = fields.Text("Texto")
     message_type = fields.Selection(
         [
             ("text", "Texto"),
@@ -61,23 +61,32 @@ class DZ23MessageInbox(models.Model):
             ("sticker", "Figurinha"),
             ("unsupported", "Não suportado"),
         ],
+        string="Tipo",
         default="text",
         required=True,
         index=True,
     )
-    caption = fields.Text()
-    reply_to = fields.Char(help="Id do provedor da mensagem respondida.")
+    caption = fields.Text("Legenda")
+    reply_to = fields.Char("Resposta a", help="Id do provedor da mensagem respondida.")
     media_ref = fields.Text(
-        readonly=True, help="Metadados normalizados de mídia/localização/contato (JSON)."
+        "Referência de mídia",
+        readonly=True,
+        help="Metadados normalizados de mídia/localização/contato (JSON).",
     )
-    payload = fields.Text(help="Envelope JSON completo (validado, sem truncamento).")
-    payload_hash = fields.Char(index=True, readonly=True, help="SHA-256 do payload.")
-    payload_preview = fields.Text(readonly=True)
+    payload = fields.Text("Payload", help="Envelope JSON completo (validado, sem truncamento).")
+    payload_hash = fields.Char(
+        "Hash do payload", index=True, readonly=True, help="SHA-256 do payload."
+    )
+    payload_preview = fields.Text("Prévia do payload", readonly=True)
     correlation_id = fields.Char(
-        index=True, readonly=True, copy=False, default=lambda self: uuid.uuid4().hex
+        "Id de correlação",
+        index=True,
+        readonly=True,
+        copy=False,
+        default=lambda self: uuid.uuid4().hex,
     )
-    received_at = fields.Datetime(default=fields.Datetime.now, readonly=True)
-    processed_at = fields.Datetime(readonly=True)
+    received_at = fields.Datetime("Recebida em", default=fields.Datetime.now, readonly=True)
+    processed_at = fields.Datetime("Processada em", readonly=True)
     status = fields.Selection(
         [
             ("pending", "Pendente"),
@@ -86,22 +95,24 @@ class DZ23MessageInbox(models.Model):
             ("failed", "Falha (retry)"),
             ("dead", "DLQ"),
         ],
+        string="Status",
         default="pending",
         required=True,
         index=True,
     )
-    attempts = fields.Integer(default=0)
-    max_attempts = fields.Integer(default=_MAX_ATTEMPTS)
-    next_attempt_at = fields.Datetime(default=fields.Datetime.now, index=True)
-    lease_until = fields.Datetime(index=True, readonly=True)
-    duration_ms = fields.Integer(readonly=True, help="Duração da última tentativa.")
-    error = fields.Char()
+    attempts = fields.Integer("Tentativas", default=0)
+    max_attempts = fields.Integer("Máx. tentativas", default=_MAX_ATTEMPTS)
+    next_attempt_at = fields.Datetime("Próxima tentativa", default=fields.Datetime.now, index=True)
+    lease_until = fields.Datetime("Lease até", index=True, readonly=True)
+    duration_ms = fields.Integer("Duração (ms)", readonly=True, help="Duração da última tentativa.")
+    error = fields.Char("Erro")
     dlq_reason = fields.Selection(
         [
             ("permanent_error", "Erro permanente"),
             ("max_attempts", "Tentativas esgotadas"),
             ("lease_expired", "Lease expirado"),
         ],
+        string="Motivo DLQ",
         readonly=True,
         index=True,
     )
@@ -109,6 +120,8 @@ class DZ23MessageInbox(models.Model):
     _uniq = models.Constraint(
         "unique(provider, channel_id, message_id)", "Mensagem já recebida (idempotência)."
     )
+    _channel_received_idx = models.Index("(channel_id, received_at)")
+    _due_idx = models.Index("(status, next_attempt_at) WHERE status IN ('pending', 'failed')")
 
     # ---------- enfileirar (chamado pelo webhook) ----------
     @api.model

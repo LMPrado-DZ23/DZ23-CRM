@@ -39,12 +39,12 @@ deps-container, odoo-tests) + PRs do dependabot sem falha. 20. 3 auditores: 0 CR
 | 5 PIX Woovi | DONE | 0580496 | smoke 151/151; CI verde |
 | 6 Mídia e templates | DONE | c050927 | smoke 179/179; CI verde |
 | 7 Caixa de atendimento humano | DONE | bcc55b6 | smoke 196/196; dev 19.0.13.0.0/agent 19.0.4.0.0 |
-| 8 Governança IA | TESTING | — | ADR-011; aguardando smoke |
-| 9 Observabilidade | PENDING | — | — |
-| 10 LGPD/retenção | PENDING | — | — |
-| 11 Testes (matriz) | PENDING | — | — |
-| 12 Documentação | PENDING | — | — |
-| Auditoria 3 agentes | PENDING | — | — |
+| 8 Governança IA | DONE | 5a88570 | ADR-011; smoke 217/217; bandit limpo; dev dz23_ai 19.0.2.0.0 / dz23_agent 19.0.5.0.0 (dump /tmp/dz23crm_pre_fase8.dump); bug real: estado do breaker perdido no rollback do chamador → cursor próprio |
+| 9 Observabilidade | DONE | 79e6497 | ADR-012; smoke 225/225; bandit limpo; dev whatsapp 19.0.14.0.0 / agent 19.0.6.0.0 (dump /tmp/dz23crm_pre_fase9.dump); bug achado: ordem de registro do modelo (arquivo renomeado) |
+| 10 LGPD/retenção | DONE | 716ee26 | ADR-013, docs/LGPD.md, runbook backup/restore; smoke 237/237; gate de log do CI replicado (0 ERROR); bandit limpo; dev whatsapp 19.0.15.0.0 / agent 19.0.7.0.0 (dump /tmp/dz23crm_pre_fase10.dump); bug achado: `_check_access` colidia com o ORM |
+| 11 Testes (matriz) | DONE | d4cf471 | docs/TEST_MATRIX.md; smoke 249/249 + upgrade -u; CI com passo de upgrade; bug achado: webhook Meta sem teto de 1000 eventos |
+| 12 Documentação | DONE | e3e5cd1 | README/ARCHITECTURE/SECURITY/docs index/INTEGRATIONS/webhooks/queue_recovery; botão de rotação de segredo (método sem UI); smoke 249/249 + upgrade; links verificados; dev whatsapp atualizado (dump /tmp/dz23crm_pre_fase12.dump) |
+| Auditoria 3 agentes | DONE | 1dad9a8 + lote 2 | audit/FINAL_THREE_AGENT_REVIEW.md: 1 CRITICAL (Woovi) + 4 HIGH corrigidos; 17 MEDIUM (16 corrigidos, 1 aceito parcial); LOW/IMPROVEMENT corrigidos ou documentados; smoke 264/264 + upgrade + gate de log; bandit limpo; dev atualizado (dump /tmp/dz23crm_pre_auditoria.dump) |
 | Push + CI verde + PR pronto | PENDING | — | — |
 
 ## Backlog adicional (feedback externo 2026-09-13)

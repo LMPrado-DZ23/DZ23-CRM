@@ -126,7 +126,7 @@ nunca são tocados.
 - Detalhes, limitações e resposta a incidente em [SECURITY.md](SECURITY.md).
 
 ## 10. Testes e CI
-- 249 testes com tag `dz23` (sem rede, APIs simuladas, cursores reais para concorrência);
+- 264 testes com tag `dz23` (sem rede, APIs simuladas, cursores reais para concorrência);
   mapa requisito → teste em [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md).
 - CI: ruff, gitleaks, bandit, semgrep, trivy, SBOM, instalação limpa + testes + upgrade.
 

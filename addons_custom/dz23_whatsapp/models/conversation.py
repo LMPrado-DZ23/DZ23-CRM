@@ -137,6 +137,15 @@ class DZ23Conversation(models.Model):
             return self._for_contact(contact)
         return self.sudo().search([("contact_id", "=", contact.id)], limit=1)
 
+    def write(self, vals):
+        if "contact_id" in vals and any(
+            conversation.contact_id.id != vals["contact_id"] for conversation in self
+        ):
+            raise UserError(
+                _("O contato de uma conversa não pode ser alterado (isolamento entre empresas).")
+            )
+        return super().write(vals)
+
     # ---------- ciclo de vida ----------
     def bot_can_reply(self):
         self.ensure_one()
@@ -146,7 +155,10 @@ class DZ23Conversation(models.Model):
         now = when or fields.Datetime.now()
         for conversation in self:
             vals = {"last_customer_message_at": now}
-            if conversation.state in _REOPEN_STATES:
+            if conversation.state == "waiting_customer" and conversation.user_id:
+                # O atendente pediu algo ao cliente: a resposta volta para ele, não ao robô.
+                vals["state"] = "human_active"
+            elif conversation.state in _REOPEN_STATES:
                 vals["state"] = "bot_active" if conversation.channel_id.agent_autoreply else "open"
             minutes = conversation.channel_id.sla_first_response_minutes or 0
             if minutes and not conversation.first_response_due_at:
@@ -154,9 +166,14 @@ class DZ23Conversation(models.Model):
             conversation.write(vals)
 
     def _on_outbound_sent(self, when=None):
-        self.write(
+        now = when or fields.Datetime.now()
+        # Aguardando atendimento interno (ex.: robô transferiu): a mensagem automática de
+        # transferência NÃO conta como primeira resposta — o SLA continua correndo.
+        waiting = self.filtered(lambda conversation: conversation.state == "waiting_internal")
+        waiting.write({"last_agent_message_at": now})
+        (self - waiting).write(
             {
-                "last_agent_message_at": when or fields.Datetime.now(),
+                "last_agent_message_at": now,
                 "first_response_due_at": False,
                 "sla_breached": False,
             }
@@ -189,6 +206,10 @@ class DZ23Conversation(models.Model):
         return True
 
     def action_release_to_bot(self):
+        if any(not conversation.channel_id.agent_autoreply for conversation in self):
+            raise UserError(
+                _("A auto-resposta está desligada neste canal: ninguém responderia o cliente.")
+            )
         self.write({"state": "bot_active"})
         self._note(_("Atendimento devolvido ao robô."))
         return True
@@ -207,14 +228,9 @@ class DZ23Conversation(models.Model):
         return True
 
     def action_block(self):
-        self.write(
-            {
-                "state": "blocked",
-                "opt_out": True,
-                "first_response_due_at": False,
-                "sla_breached": False,
-            }
-        )
+        # Bloquear já impede qualquer envio; NÃO marca opt-out (isso é pedido do cliente
+        # e sobreviveria ao desbloqueio).
+        self.write({"state": "blocked", "first_response_due_at": False, "sla_breached": False})
         self._note(_("Contato bloqueado: sem respostas automáticas e sem envios."))
         return True
 
@@ -297,6 +313,20 @@ class DZ23ConversationReply(models.TransientModel):
         )
         if not self.template_id and not self.window_open:
             raise UserError(_("Fora da janela de 24 h do WhatsApp: escolha um template aprovado."))
+        if self.template_id:
+            if self.conversation_id.sudo().opt_out:
+                raise UserError(
+                    _(
+                        "O cliente pediu para não receber mensagens proativas (opt-out): "
+                        "templates não podem ser enviados. Aguarde o cliente escrever."
+                    )
+                )
+            expected = self.template_id.variable_count
+            if len(params) != expected:
+                raise UserError(
+                    _("O template exige %(expected)s variável(is); você informou %(given)s.")
+                    % {"expected": expected, "given": len(params)}
+                )
         self.conversation_id._send_human(
             body=None if self.template_id else self.body,
             template=self.template_id or None,
@@ -311,12 +341,27 @@ class DZ23ConversationTransfer(models.TransientModel):
 
     conversation_id = fields.Many2one("dz23.conversation", required=True, ondelete="cascade")
     team_id = fields.Many2one("crm.team", string="Equipe")
-    user_id = fields.Many2one("res.users", string="Responsável")
+    user_id = fields.Many2one(
+        "res.users", string="Responsável", domain=lambda self: self._domain_attendants()
+    )
     note = fields.Text("Nota interna")
+
+    @api.model
+    def _domain_attendants(self):
+        group = self.env.ref("dz23_whatsapp.group_dz23_attendant", raise_if_not_found=False)
+        return [("share", "=", False)] + ([("all_group_ids", "in", group.id)] if group else [])
 
     def action_transfer(self):
         self.ensure_one()
         conversation = self.conversation_id
+        user = self.user_id
+        if user and (
+            conversation.company_id not in user.company_ids
+            or not user.has_group("dz23_whatsapp.group_dz23_attendant")
+        ):
+            raise UserError(
+                _("Transfira apenas para atendentes com acesso à empresa desta conversa.")
+            )
         conversation.write(
             {
                 "team_id": (self.team_id or conversation.team_id).id,

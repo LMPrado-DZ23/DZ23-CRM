@@ -11,7 +11,7 @@
                             icon="fa-qrcode" invisible="provider != 'evolution'"/>
                     <button name="action_rotate_callback_secret" type="object"
                             string="Rotacionar segredo de callback" icon="fa-refresh"
-                            groups="base.group_system"
+                            groups="base.group_system" invisible="provider != 'evolution'"
                             confirm="Gera um novo segredo de callback. Na Evolution o webhook é reconfigurado automaticamente; nos demais provedores o segredo não é usado. Continuar?"/>
                 </header>
                 <sheet>

@@ -806,4 +806,12 @@ class DZ23Channel(models.Model):
                 "/webhook/set/%s" % self.evo_instance,
                 json=self._evolution_webhook_config(),
             )
-        return True
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Segredo de callback rotacionado"),
+                "message": _("O webhook da instância Evolution foi atualizado com o novo segredo."),
+                "type": "success",
+            },
+        }

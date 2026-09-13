@@ -3,9 +3,9 @@
 Cada item obrigatório da Fase 11 aponta para o(s) teste(s) que o comprovam. Todos
 rodam com a tag `dz23`, sem rede e sem credenciais reais (APIs simuladas).
 
-- **Evidência local:** `bash scripts/smoke.sh` → `0 failed, 0 error(s) of 249 tests`
-  (banco descartável `dz23_smoke_6969`, instalação limpa + upgrade `-u`), commit da
-  Fase 11.
+- **Evidência local:** `bash scripts/smoke.sh` → `0 failed, 0 error(s) of 264 tests`
+  (banco descartável `dz23_smoke_20117`, instalação limpa + upgrade `-u`), após as
+  correções da auditoria final ([`audit/FINAL_THREE_AGENT_REVIEW.md`](../audit/FINAL_THREE_AGENT_REVIEW.md)).
 - **Evidência remota:** job `odoo-tests` do GitHub Actions no mesmo commit (mesmos
   gates: módulos carregados, zero falhas/erros, nenhuma linha ERROR/CRITICAL e
   atualização `-u` sem erro).
@@ -36,6 +36,7 @@ Convenção: `módulo/arquivo::teste` (arquivos em `addons_custom/<módulo>/test
 | Inbound duplicado | `test_inbox::test_enqueue_dedupe_sequential`; `test_webhook_providers::test_twilio_inbound_is_persisted_once` |
 | Outbound duplicado | `test_outbox::test_cron_sends_once_no_duplicate`; `test_queue_claim::test_concurrent_claim_is_disjoint` |
 | Timeout depois do envio | `test_queue_claim::test_outbox_expired_lease_with_provider_id_is_not_resent`; `test_queue_claim::test_outbox_expired_lease_without_id_retries`; `test_provider_errors::test_meta_callback_reconciles_lost_ack` |
+| Status antes do commit do envio | `test_outbox::test_status_callback_before_send_commit_is_applied` |
 | Retry | `test_outbox::test_process_failure_retries_then_dlq`; `test_inbox::test_retry_backoff_then_dlq`; `test_provider_errors::test_network_error_is_transient` |
 | `Retry-After` | `test_provider_errors::test_rate_limit_respects_retry_after_and_pauses_channel`; `test_provider_errors::test_retry_after_http_date` |
 | DLQ | `test_provider_errors::test_permanent_error_goes_straight_to_dlq`; `test_queue_claim::test_inbox_expired_lease_at_max_attempts_goes_to_dlq`; `test_message_lifecycle::test_dlq_sets_failed_lifecycle` |
@@ -73,6 +74,7 @@ Convenção: `módulo/arquivo::teste` (arquivos em `addons_custom/<módulo>/test
 | Pagamento confirmado | `test_woovi::test_completed_with_value_confirms` |
 | Estorno | `test_woovi::test_refund_is_recorded` |
 | Webhook fora de ordem | `test_woovi::test_out_of_order_expired_after_completed_is_ignored` |
+| Webhook forjado por outra conta Woovi | `test_woovi::test_webhook_status_comes_from_api_not_payload`, `test_webhook_for_another_charge_is_rejected` |
 
 ## Multi-tenant
 
@@ -86,6 +88,7 @@ Convenção: `módulo/arquivo::teste` (arquivos em `addons_custom/<módulo>/test
 | Pagamento isolado | `dz23_payment_woovi/test_woovi_tenancy::test_payment_and_event_hidden_from_other_company` |
 | Métricas isoladas | `test_health_metrics::test_metrics_isolated_by_company` |
 | DLQ isolada | `test_tenancy_queues::test_dlq_search_is_isolated_by_company`, `test_reading_other_company_dlq_is_denied` |
+| Dados não mudam de empresa | `test_tenancy::test_contact_channel_cannot_move_to_other_company`; contatos/composição só Atendente: `test_conversation::test_plain_user_cannot_read_contacts_or_compose` |
 | Extras | limites de IA por empresa: `test_ai_governance::test_daily_call_limit_per_company`; LGPD por empresa: `test_privacy::test_subject_hash_is_per_company_and_stable` |
 
 ## Instalação

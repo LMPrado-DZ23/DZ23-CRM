@@ -27,15 +27,16 @@ Menu **DZ23 WhatsApp → Saúde dos canais**. Cada alerta aponta a fila:
 | Entrada (`dz23.message.inbox`) | Inbox (recebidas) | pending → processing → done · failed (retry) · dead (DLQ) | 6 | processamento do robô/atendimento |
 | Saída (`dz23.message.outbox`) | Outbox (respostas) | pending → sending → sent · failed · dead | 6 | `sent` = provedor aceitou; entrega/leitura em `Status atual` |
 | Eventos de status (`dz23.message.event`) | Eventos de status | `processed` = aplicado à saída | cron reaplica | append-only |
-| IA (`dz23.ai.request`) | Fila de IA | pending → processing → done · failed | 3 | ao esgotar ou com IA indisponível: transfere para humano |
-| Mídia (`dz23.message.media`) | Mídias recebidas | pending → processing → downloaded · failed · rejected · dead · expired | configurável | `rejected` = arquivo recusado (tipo/tamanho/host) |
-| Woovi (`dz23.woovi.event`) | Eventos Woovi | pending → done · ignored · rejected · failed | 5 | conciliação periódica corrige status perdido |
+| IA (`dz23.ai.request`) | Fila de IA | pending → processing → done · failed | 3 | sem botão de reprocessar: ao esgotar ou com IA indisponível a conversa é transferida para humano |
+| Mídia (`dz23.message.media`) | Mídias recebidas | pending → processing → downloaded · failed · rejected · dead · expired | 5 | `rejected` = arquivo recusado (tipo/tamanho/host) |
+| Woovi (`dz23.woovi.event`) | botão **Ver eventos Woovi** no provedor de pagamento Woovi | pending → done · ignored · rejected · failed | 5 | o webhook só dispara a releitura na API; a conciliação periódica corrige status perdido |
 
 Motivos de DLQ (`dlq_reason`): **erro permanente** do provedor (ex.: número inválido,
 template não aprovado), **tentativas esgotadas**, **lease expirado** no limite.
 
 ## 3. Crons
-Menu **Configurações → Técnico → Ações agendadas**, filtre por "DZ23":
+Menu **Configurações → Técnico → Ações agendadas** (requer o **modo desenvolvedor**
+ativado), filtre por "DZ23":
 entrada e saída (1 min), IA (1 min), mídia (1 min), reaplicar eventos de status,
 SLA, métricas (1 h), retenção LGPD (diário), conciliação Woovi. Se uma fila está parada,
 confira se o cron está **ativo** e a data da próxima execução; em produção com
@@ -50,8 +51,9 @@ confira se o cron está **ativo** e a data da próxima execução; em produção
    - fora da janela de 24 h → responder com template;
    - número inválido/bloqueado → não reprocessar;
    - bug de processamento na entrada → corrigir e atualizar o módulo.
-3. **Reenfileirar** (botão no item): volta para `pending` com tentativas zeradas. A
-   ação é auditada.
+3. Botão no item — **Reprocessar** (entrada), **Reenviar** (saída) ou **Tentar de novo**
+   (mídia): volta para `pending` com tentativas zeradas. Na entrada e na saída a ação
+   fica na auditoria de acesso.
 4. **Atenção na saída**: reprocessar um item cujo provedor pode ter aceitado a mensagem
    (lease expirado sem id) pode gerar mensagem duplicada ao cliente — é a garantia
    *at-least-once* documentada.

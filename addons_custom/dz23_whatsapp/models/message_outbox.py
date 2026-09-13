@@ -64,8 +64,8 @@ class DZ23MessageOutbox(models.Model):
     company_id = fields.Many2one(
         related="channel_id.company_id", store=True, index=True, readonly=True
     )
-    recipient = fields.Char(required=True, help="Número E.164 do destinatário")
-    body = fields.Text(required=True)
+    recipient = fields.Char("Destinatário", required=True, help="Número E.164 do destinatário")
+    body = fields.Text("Mensagem", required=True)
     # Estado do NOSSO envio (fila).
     status = fields.Selection(
         [
@@ -75,43 +75,66 @@ class DZ23MessageOutbox(models.Model):
             ("failed", "Falha (retry)"),
             ("dead", "DLQ"),
         ],
+        string="Envio",
         default="pending",
         required=True,
         index=True,
     )
-    attempts = fields.Integer(default=0)
-    max_attempts = fields.Integer(default=_MAX_ATTEMPTS)
-    next_attempt_at = fields.Datetime(default=fields.Datetime.now, index=True)
-    lease_until = fields.Datetime(index=True, readonly=True)
-    duration_ms = fields.Integer(readonly=True, help="Duração da última tentativa de envio.")
-    error = fields.Char()
-    dlq_reason = fields.Selection(DLQ_REASONS, readonly=True, index=True)
+    attempts = fields.Integer("Tentativas", default=0)
+    max_attempts = fields.Integer("Máx. tentativas", default=_MAX_ATTEMPTS)
+    next_attempt_at = fields.Datetime("Próxima tentativa", default=fields.Datetime.now, index=True)
+    lease_until = fields.Datetime("Lease até", index=True, readonly=True)
+    duration_ms = fields.Integer(
+        "Duração (ms)", readonly=True, help="Duração da última tentativa de envio."
+    )
+    error = fields.Char("Erro")
+    dlq_reason = fields.Selection(DLQ_REASONS, string="Motivo DLQ", readonly=True, index=True)
     provider_message_id = fields.Char(
-        readonly=True, index=True, help="Id da mensagem confirmado pelo provedor."
+        "Id no provedor", readonly=True, index=True, help="Id da mensagem confirmado pelo provedor."
     )
     correlation_id = fields.Char(
-        index=True, readonly=True, copy=False, default=lambda self: uuid.uuid4().hex
+        "Id de correlação",
+        index=True,
+        readonly=True,
+        copy=False,
+        default=lambda self: uuid.uuid4().hex,
     )
     client_message_id = fields.Char(
-        readonly=True, copy=False, help="Id enviado ao provedor quando ele suporta."
+        "Id enviado ao provedor",
+        readonly=True,
+        copy=False,
+        help="Id enviado ao provedor quando ele suporta.",
     )
     # Ciclo de vida da mensagem NO PROVEDOR (monotônico, ADR-006).
     current_status = fields.Selection(
-        MESSAGE_STATUSES, default="queued", required=True, index=True, readonly=True
+        MESSAGE_STATUSES,
+        string="Status atual",
+        default="queued",
+        required=True,
+        index=True,
+        readonly=True,
     )
-    sent_at = fields.Datetime(readonly=True)
-    delivered_at = fields.Datetime(readonly=True)
-    read_at = fields.Datetime(readonly=True)
-    failed_at = fields.Datetime(readonly=True)
-    last_status_at = fields.Datetime(readonly=True)
-    provider_error_code = fields.Char(readonly=True)
-    provider_error_message = fields.Char(readonly=True)
-    event_ids = fields.One2many("dz23.message.event", "outbox_id", readonly=True)
+    sent_at = fields.Datetime("Enviada em", readonly=True)
+    delivered_at = fields.Datetime("Entregue em", readonly=True)
+    read_at = fields.Datetime("Lida em", readonly=True)
+    failed_at = fields.Datetime("Falhou em", readonly=True)
+    last_status_at = fields.Datetime("Último status em", readonly=True)
+    provider_error_code = fields.Char("Código de erro do provedor", readonly=True)
+    provider_error_message = fields.Char("Mensagem de erro do provedor", readonly=True)
+    event_ids = fields.One2many("dz23.message.event", "outbox_id", "Eventos", readonly=True)
     conversation_id = fields.Many2one(
-        "dz23.conversation", ondelete="set null", index=True, readonly=True
+        "dz23.conversation", "Conversa", ondelete="set null", index=True, readonly=True
     )
-    template_id = fields.Many2one("dz23.message.template", ondelete="restrict", readonly=True)
-    template_params = fields.Text(readonly=True, help="Variáveis do template (JSON).")
+    template_id = fields.Many2one(
+        "dz23.message.template", "Template", ondelete="restrict", readonly=True
+    )
+    template_params = fields.Text(
+        "Variáveis do template", readonly=True, help="Variáveis do template (JSON)."
+    )
+
+    _channel_sent_idx = models.Index("(channel_id, sent_at)")
+    _channel_created_idx = models.Index("(channel_id, create_date)")
+    _due_idx = models.Index("(status, next_attempt_at) WHERE status IN ('pending', 'failed')")
 
     # ---------- enfileirar ----------
     @api.model
@@ -293,8 +316,30 @@ class DZ23MessageOutbox(models.Model):
             self._apply_status("sent", occurred_at=now)
             if self.conversation_id:
                 self.conversation_id.sudo()._on_outbound_sent(now)
+            self._apply_early_status_events()
         except Exception as e:  # noqa: BLE001 - qualquer falha vira retry/DLQ
             self._register_failure(e, started)
+
+    def _apply_early_status_events(self):
+        """Callback de status que chegou ANTES do id do provedor ser gravado (corrida com
+        o commit do envio): aplica agora. Nunca derruba um envio já aceito."""
+        self.ensure_one()
+        if not self.provider_message_id:
+            return
+        try:
+            with self.env.cr.savepoint():
+                self.env["dz23.message.event"].sudo().search(
+                    [
+                        ("channel_id", "=", self.channel_id.id),
+                        ("provider_message_id", "=", self.provider_message_id),
+                        ("processed", "=", False),
+                    ],
+                    order="id",
+                )._apply_to_outbox()
+        except Exception as error:  # noqa: BLE001 - o cron de eventos reaplica
+            _logger.warning(
+                "Outbox %s: status antecipado não aplicado (%s).", self.id, type(error).__name__
+            )
 
     def _register_failure(self, exc, started):
         """Erro permanente => DLQ imediata; transitório => retry com backoff

@@ -103,8 +103,17 @@ class TestMessageLifecycle(TransactionCase):
         ev, created = self._event("delivered", 1, mid="EXTERNO-9")
         self.assertTrue(created)
         self.assertFalse(ev.outbox_id)
-        self.assertTrue(ev.processed)
+        # Dentro da janela o evento fica pendente (o envio pode ainda não ter gravado o id).
+        self.assertFalse(ev.processed)
         self.assertEqual(self.outbox.current_status, "sent")
+        self.env.flush_all()
+        self.env.cr.execute(
+            "UPDATE dz23_message_event SET received_at = %s WHERE id = %s",
+            (fields.Datetime.now() - timedelta(hours=1), ev.id),
+        )
+        self.env.invalidate_all()
+        self.Event._cron_apply_pending()
+        self.assertTrue(ev.processed, "fora da janela é encerrado sem outbox")
 
     def test_contract_validation(self):
         with self.assertRaises(ValueError):

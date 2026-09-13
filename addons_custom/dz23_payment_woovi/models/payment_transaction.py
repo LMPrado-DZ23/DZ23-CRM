@@ -125,6 +125,12 @@ class PaymentTransaction(models.Model):
         """Aplica webhook/consulta Woovi. Retorna (resultado, mensagem) com resultado em
         {'applied', 'ignored', 'rejected'}; levanta WooviEventError se faltar dado."""
         self.ensure_one()
+        # Webhook e conciliação podem aplicar ao mesmo tempo: serializa por transação e
+        # relê o estado já com o lock (a checagem de ordem usa o valor atual).
+        self.env.cr.execute(
+            "SELECT id FROM payment_transaction WHERE id = %s FOR UPDATE", (self.id,)
+        )
+        self.invalidate_recordset()
         status = normalize_status(payment_data)
         if not status:
             return "ignored", "status Woovi desconhecido"

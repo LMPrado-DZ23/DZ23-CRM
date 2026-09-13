@@ -202,15 +202,32 @@ class DZ23AIRequest(models.Model):
             self._register_failure(e, started)
 
     def _deliver_handoff(self, error, started):
-        """IA indisponível: avisa o cliente e passa a conversa para um humano."""
+        """IA indisponível: avisa o cliente e passa a conversa para um humano. Uma falha
+        aqui não derruba o lote do cron (o item volta para retry)."""
         self.ensure_one()
-        conversation = self._conversation()
-        if conversation and conversation.bot_can_reply():
-            conversation._agent_handoff("ai_unavailable")
-            text = self.channel_id._agent_handoff_text()
-        else:
-            text = self.fallback_text or self._generic_fallback()
-        self._deliver(text, used_fallback=True, started=started, error=error)
+        try:
+            with self.env.cr.savepoint():
+                conversation = self._conversation()
+                if conversation and conversation.bot_can_reply():
+                    conversation._agent_handoff("ai_unavailable")
+                    text = self.channel_id._agent_handoff_text()
+                else:
+                    text = self.fallback_text or self._generic_fallback()
+                self._deliver(text, used_fallback=True, started=started, error=error)
+        except Exception as exc:  # noqa: BLE001 - isola o item
+            _logger.warning(
+                "IA request %s: transferência falhou (%s).", self.id, type(exc).__name__
+            )
+            self.write(
+                {
+                    "status": "failed",
+                    "lease_until": False,
+                    "error": sanitize_error("%s: %s" % (type(exc).__name__, exc)),
+                    "next_attempt_at": fields.Datetime.add(
+                        fields.Datetime.now(), seconds=_MAX_BACKOFF_SECONDS
+                    ),
+                }
+            )
 
     def _register_failure(self, exc, started):
         if self.attempts >= self.max_attempts:

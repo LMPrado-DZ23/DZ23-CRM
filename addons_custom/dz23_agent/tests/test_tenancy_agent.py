@@ -45,6 +45,19 @@ class TestAgentTenancy(TransactionCase):
             }
         )
 
+    def test_agenda_lock_covers_the_whole_company(self):
+        # Auditoria A-3: dois canais da mesma empresa disputam o MESMO lock de agenda.
+        sibling = self._channel("Canal A2 QA11", self.company_a)
+        taken = []
+        self.patch(
+            type(self.channel_a),
+            "_agent_lock",
+            lambda channel, *parts: taken.append((channel.company_id.id, parts)),
+        )
+        self.channel_a._agent_agenda_lock()
+        sibling._agent_agenda_lock()
+        self.assertEqual(taken, [(self.company_a.id, ("agenda",))] * 2)
+
     def test_same_phone_creates_one_lead_per_company(self):
         lead_a = self.channel_a._agent_contact(self.number).lead_id
         lead_b = self.channel_b._agent_contact(self.number).lead_id

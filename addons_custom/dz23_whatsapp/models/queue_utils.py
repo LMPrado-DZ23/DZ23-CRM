@@ -114,9 +114,14 @@ def claim_due(
                                     %(rate_limit)s
                           ) cand
                            WHERE cand.rn <= %(per_channel)s)
+                      -- Reavaliado pelo Postgres DEPOIS de obter o lock da linha: se
+                      -- outro worker já reivindicou e commitou, a linha não casa mais.
+                      AND status = ANY(%(from_states)s)
+                      AND next_attempt_at <= %(now)s
                     ORDER BY next_attempt_at, id
                     LIMIT %(limit)s
                     FOR UPDATE SKIP LOCKED)
+               AND target.status = ANY(%(from_states)s)
          RETURNING target.id
             """,
             table=SQL.identifier(table),

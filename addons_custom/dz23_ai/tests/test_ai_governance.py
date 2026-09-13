@@ -7,7 +7,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import requests
-from odoo import fields
+from odoo import SUPERUSER_ID, api, fields
 from odoo.addons.dz23_ai.models.ai_service import (
     AICircuitOpenError,
     AILimitExceededError,
@@ -34,6 +34,46 @@ def _openai_ok(text="Olá!", prompt_tokens=1000, completion_tokens=500):
             "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
         }
     )
+
+
+@tagged("post_install", "-at_install", "dz23")
+class TestAIGovernanceRealCursor(TransactionCase):
+    """Auditoria A-6: SEM o modo de teste do registry o cursor de governança é uma conexão
+    real. Prova que o breaker aberto sobrevive ao rollback da transação do chamador."""
+
+    def test_breaker_survives_caller_rollback(self):
+        registry = self.env.registry
+        company_id = self.env.company.id
+        purpose = "teste_cursor_real_qa12"
+        try:
+            with registry.cursor() as caller_cr:
+                env = api.Environment(caller_cr, SUPERUSER_ID, {})
+                params = env["ir.config_parameter"].sudo()
+                params.set_param("dz23.ai_provider", "openai")
+                params.set_param("dz23.ai.external_allowed", "1")
+                params.set_param("dz23.ai.openai_key", "chave-de-teste")
+                with patch(_POST, return_value=_resp(429, headers={"Retry-After": "120"})):
+                    try:
+                        with caller_cr.savepoint():
+                            env["dz23.ai"].chat("oi", purpose=purpose)
+                    except AIRateLimitedError:
+                        pass
+                caller_cr.rollback()  # o chamador desfaz TUDO o que era dele
+            with registry.cursor() as check_cr:
+                check_cr.execute(
+                    "SELECT state FROM dz23_ai_breaker WHERE company_id = %s AND provider = %s",
+                    (company_id, "openai"),
+                )
+                row = check_cr.fetchone()
+            self.assertEqual(row and row[0], "open")
+        finally:
+            with registry.cursor() as clean_cr:
+                clean_cr.execute(
+                    "DELETE FROM dz23_ai_breaker WHERE company_id = %s AND provider = %s",
+                    (company_id, "openai"),
+                )
+                clean_cr.execute("DELETE FROM dz23_ai_usage WHERE purpose = %s", (purpose,))
+            registry.clear_cache()  # o cache de parâmetros não pode herdar valor desfeito
 
 
 @tagged("post_install", "-at_install", "dz23")
@@ -167,6 +207,20 @@ class TestAIGovernance(TransactionCase):
         self.assertNotIn("maria.qa@example.com", sent)
         self.assertNotIn("99999-8888", sent)
         self.assertIn("reforma", sent)
+
+    def test_ollama_on_public_host_is_treated_as_external(self):
+        # Auditoria B-7: "local" é onde o dado vai, não o nome do provedor.
+        self.company.dz23_ai_provider = "ollama"
+        self.ICP.set_param("dz23.ai.external_allowed", "0")
+        self.ICP.set_param("dz23.ai.ollama_base", "https://ollama.exemplo-publico.com.br")
+        self.assertTrue(self.AI._is_external(self.company))
+        with patch(_POST) as post:
+            error = self._raises(UserError, self.AI.chat, "oi")
+        self.assertIn("política", str(error).lower())
+        self.assertEqual(post.call_count, 0)
+        for base in ("http://localhost:11434", "http://ollama:11434", "http://10.0.0.5:11434"):
+            self.ICP.set_param("dz23.ai.ollama_base", base)
+            self.assertFalse(self.AI._is_external(self.company), base)
 
     def test_usage_retention_purge(self):
         old = self.Usage._log(self.company, "ollama", "m", "teste", status="ok")

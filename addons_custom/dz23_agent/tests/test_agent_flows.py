@@ -308,9 +308,8 @@ class TestAgentFlows(TransactionCase):
                 mute_logger("odoo.sql_db"),
                 self.assertRaises(psycopg2.errors.LockNotAvailable),
             ):
-                env_b["dz23.channel"].browse(ids["channel"])._agent_lock(
-                    "agenda", "canal-%s" % ids["channel"]
-                )
+                # Mesma chave que _agent_agenda_lock usa: a agenda da EMPRESA (auditoria A-3).
+                env_b["dz23.channel"].browse(ids["channel"])._agent_lock("agenda")
             cr_b.rollback()
             cr_a.commit()
             env_b = api.Environment(cr_b, SUPERUSER_ID, {})

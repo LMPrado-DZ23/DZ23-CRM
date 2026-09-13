@@ -19,13 +19,17 @@
                         <field name="contact_count"/>
                         <field name="reason" placeholder="Protocolo ou motivo (obrigatório para anonimizar)"/>
                     </group>
+                    <div class="alert alert-warning" role="alert" invisible="not phone or contact_count">
+                        Nenhum contato de WhatsApp com este telefone na empresa escolhida. Confira
+                        o número (com DDI e DDD) e a empresa.
+                    </div>
                 </sheet>
                 <footer>
                     <button name="action_export" type="object" string="Exportar dados (JSON)"
                             class="btn-primary" invisible="not contact_count"/>
                     <button name="action_anonymize" type="object" string="Anonimizar titular"
                             class="btn-danger" invisible="not contact_count"
-                            confirm="Ação irreversível: textos, anexos e identificação do titular serão removidos. Continuar?"/>
+                            confirm="Ação irreversível: mensagens, anexos, notas, dados de contato do lead e do cliente e textos enviados à IA serão removidos. O nome do cliente em pedidos confirmados e faturas é mantido (obrigação fiscal). Continuar?"/>
                     <button string="Fechar" special="cancel" class="btn-secondary"/>
                 </footer>
             </form>

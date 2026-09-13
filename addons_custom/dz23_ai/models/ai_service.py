@@ -9,11 +9,13 @@
 # timeout por provedor, 429 tipado, circuit breaker por empresa/provedor, limites
 # diários/mensais por empresa e registro de uso (tokens, custo estimado, duração).
 # Chaves/base ficam em ir.config_parameter (Ajustes, só admin), nunca no código.
+import ipaddress
 import logging
 import math
 import re
 import time
 from contextlib import contextmanager
+from urllib.parse import urlparse
 
 import requests
 from odoo import api, fields, models
@@ -100,6 +102,23 @@ def _redact_pii(text):
     return text
 
 
+def is_private_endpoint(url):
+    """True se a URL aponta para esta máquina/rede interna (loopback, IP privado, nome
+    sem domínio público como serviço do Docker, .local/.internal/.lan)."""
+    host = (urlparse(url or "").hostname or "").lower()
+    if not host:
+        return False
+    if host in ("localhost", "host.docker.internal") or "." not in host:
+        return True
+    if host.endswith((".local", ".internal", ".lan")):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback
+
+
 def estimate_tokens(text):
     return math.ceil(len(text or "") / 4)
 
@@ -131,7 +150,12 @@ class DZ23AI(models.AbstractModel):
         return _DEFAULT_MODELS.get(self._provider(company), "llama3.2:3b")
 
     def _is_external(self, company=None):
-        return self._provider(company) not in _LOCAL_PROVIDERS
+        """Externo = os dados saem da infraestrutura: provedor em nuvem OU "Ollama"
+        apontado para um host público (aplica consentimento, redação e bloqueio de imagem)."""
+        if self._provider(company) not in _LOCAL_PROVIDERS:
+            return True
+        base = self._cfg("dz23.ai.ollama_base", "http://host.docker.internal:11434")
+        return not is_private_endpoint(base)
 
     def _external_allowed(self, company=None):
         """Consentimento para IA externa: política da empresa ou, se 'padrão', global."""
@@ -184,7 +208,7 @@ class DZ23AI(models.AbstractModel):
         if not adapter:
             raise AIConfigError(_("Provedor de IA não suportado: %s") % provider)
         # GATE de privacidade: externo só com consentimento; redige PII antes de sair.
-        if provider not in _LOCAL_PROVIDERS:
+        if self._is_external(company):
             if not self._external_allowed(company):
                 raise UserError(
                     _(

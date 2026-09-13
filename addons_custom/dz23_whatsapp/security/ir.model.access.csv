@@ -1,9 +1,9 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_dz23_whatsapp_compose,dz23.whatsapp.compose.user,model_dz23_whatsapp_compose,base.group_user,1,1,1,1
+access_dz23_whatsapp_compose,dz23.whatsapp.compose.user,model_dz23_whatsapp_compose,group_dz23_attendant,1,1,1,1
 access_dz23_whatsapp_evolution,dz23.whatsapp.evolution.user,model_dz23_whatsapp_evolution,base.group_system,1,1,1,1
 access_dz23_channel_user,dz23.channel.user,model_dz23_channel,base.group_user,1,0,0,0
 access_dz23_channel_manager,dz23.channel.manager,model_dz23_channel,base.group_system,1,1,1,1
-access_dz23_channel_contact_user,dz23.channel.contact.user,model_dz23_channel_contact,base.group_user,1,1,1,0
+access_dz23_channel_contact_user,dz23.channel.contact.user,model_dz23_channel_contact,group_dz23_attendant,1,0,0,0
 access_dz23_channel_contact_manager,dz23.channel.contact.manager,model_dz23_channel_contact,base.group_system,1,1,1,1
 access_dz23_message_inbox_user,dz23.message.inbox.attendant,model_dz23_message_inbox,group_dz23_attendant,1,0,0,0
 access_dz23_message_inbox_manager,dz23.message.inbox.manager,model_dz23_message_inbox,base.group_system,1,1,1,1

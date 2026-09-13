@@ -93,7 +93,7 @@ Acesse `http://localhost:8069`. Configure os canais seguindo o
 
 ## Qualidade e segurança
 
-- **Testes** (tag `dz23`): **249 testes, 0 falhas e 0 erros** no commit da Fase 11 —
+- **Testes** (tag `dz23`): **264 testes, 0 falhas e 0 erros** após a auditoria final —
   instalação limpa + atualização (`-u`) em banco descartável (`scripts/smoke.sh`) e o
   mesmo no job `odoo-tests` do CI. Cobertura por requisito em
   [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md). Nenhum teste usa rede ou credencial real.

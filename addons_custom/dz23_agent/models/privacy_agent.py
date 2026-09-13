@@ -80,6 +80,19 @@ class DZ23PrivacyRequestAgent(models.TransientModel):
         ]
         return data
 
+    def _anonymize_partner(self, partner):
+        """Contato do parceiro sai sempre; o NOME só sai se não houver documento fiscal
+        (pedido confirmado ou fatura) que precise identificar o cliente."""
+        fiscal = self.env["sale.order"].sudo().search_count(
+            [("partner_id", "=", partner.id), ("state", "=", "sale")], limit=1
+        ) or self.env["account.move"].sudo().search_count(
+            [("partner_id", "=", partner.id)], limit=1
+        )
+        vals = {name: False for name in ("phone", "mobile", "email") if name in partner._fields}
+        if not fiscal:
+            vals["name"] = _("Titular anonimizado")
+        partner.with_context(tracking_disable=True).write(vals)
+
     def _anonymize_extra(self, contact):
         result = super()._anonymize_extra(contact)
         lead = contact.lead_id.sudo()
@@ -89,7 +102,13 @@ class DZ23PrivacyRequestAgent(models.TransientModel):
             {"prompt_text": ERASED, "response_text": False, "fallback_text": False}
         )
         lead.message_ids.filtered("body").write({"body": "<p>%s</p>" % ERASED})
-        lead.write(
+        # Valores antigos rastreados (telefone/e-mail anteriores) também saem.
+        self.env["mail.tracking.value"].sudo().search(
+            [("mail_message_id", "in", lead.message_ids.ids)]
+        ).unlink()
+        if lead.partner_id:
+            self._anonymize_partner(lead.partner_id.sudo())
+        lead.with_context(tracking_disable=True).write(
             {
                 "name": _("Lead anonimizado"),
                 "contact_name": False,

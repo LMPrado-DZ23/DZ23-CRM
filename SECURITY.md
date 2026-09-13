@@ -36,8 +36,12 @@ Vulnerabilidades no **Odoo** (não redistribuído aqui) vão para a Odoo S.A.; n
   templates, ações de negócio, métricas, supressões, auditoria, IA e eventos Woovi.
 - Credenciais de canal visíveis/editáveis só por administrador; alteração registrada
   na auditoria (nomes dos campos, nunca valores).
-- Usuário interno comum não lê mensagens de WhatsApp; atendentes e supervisores só da
-  própria empresa.
+- Filas, conversas, contatos e composição de WhatsApp só para os grupos Atendente/
+  Supervisor, e só da própria empresa. **Atenção:** o robô registra no chatter do lead as
+  mensagens recebidas e as respostas enviadas — quem tem acesso ao lead no CRM (vendas)
+  lê esse histórico. Restrinja o acesso ao CRM se isso não for desejado.
+- Canal de um contato e contato de uma conversa não podem ser trocados depois de criados
+  (evita mover dados entre empresas).
 
 ### Mídia recebida
 - Download só de hosts permitidos (anti-SSRF), sem credenciais na URL, com limite de
@@ -68,6 +72,18 @@ Vulnerabilidades no **Odoo** (não redistribuído aqui) vão para a Odoo S.A.; n
 - Backups não são alcançados pela anonimização; siga
   [docs/runbooks/backup_restore.md](docs/runbooks/backup_restore.md).
 - Evolution API é um provedor não oficial do WhatsApp (risco de bloqueio do número).
+- A auditoria registra a abertura de registros pela interface; leituras em lote via RPC
+  (`read`/`search_read`) e listagens não geram linha de auditoria.
+- A redação de PII antes da IA externa é por padrões (e-mail, telefone, CPF/CNPJ) — é
+  melhor esforço: nomes e endereços escritos livremente não são removidos. "Ollama" num
+  host público é tratado como IA externa (consentimento, redação, sem imagem).
+- O pseudônimo do telefone (HMAC com o segredo do banco) é reversível por quem tem o
+  banco e o segredo — é **pseudonimização**, não anonimização irreversível.
+- Download de mídia valida a URL inicial contra a lista de hosts; redirecionamentos
+  seguidos pela biblioteca HTTP não são revalidados (a CDN de mídia da Twilio fica
+  fora da lista) — melhoria registrada na auditoria final.
+- No CI, `bandit`/`semgrep` rodam na versão mais recente publicada (não pinada) e o
+  gitleaks ignora `docs/adr/`, `README.md` e `ARCHITECTURE.md` — melhoria registrada.
 
 ## Produção
 - Odoo **atrás de reverse proxy** que sobrescreva/limpe `X-Forwarded-*` do cliente

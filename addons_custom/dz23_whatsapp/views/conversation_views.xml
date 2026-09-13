@@ -14,7 +14,7 @@
                         </div>
                         <field name="phone" class="text-muted small"/>
                         <div class="d-flex justify-content-between mt-1">
-                            <field name="last_customer_message_at" widget="remaining_days" invisible="not last_customer_message_at"/>
+                            <field name="last_customer_message_at" class="text-muted small" invisible="not last_customer_message_at"/>
                             <span t-if="record.sla_breached.raw_value" class="badge text-bg-danger">SLA</span>
                             <field name="user_id" widget="many2one_avatar_user"/>
                         </div>

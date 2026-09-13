@@ -84,6 +84,14 @@ class TestPrivacyAgent(TransactionCase):
         self.assertTrue(requests)
         self.assertTrue(all(request.prompt_text == ERASED for request in requests))
         self.assertTrue(order.exists(), "pedido de venda (fiscal) permanece")
+        # Auditoria B-3: contato do parceiro e valores antigos rastreados também saem.
+        partner = order.partner_id
+        self.assertFalse(partner.phone)
+        self.assertEqual(partner.name, "Titular anonimizado", "orçamento em rascunho não é fiscal")
+        old_values = self.env["mail.tracking.value"].search(
+            [("mail_message_id", "in", lead.message_ids.ids)]
+        )
+        self.assertFalse(old_values)
 
     def test_retention_clears_old_bot_notes_on_lead(self):
         lead = self.channel._agent_contact(self.number).lead_id

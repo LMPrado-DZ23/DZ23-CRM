@@ -5,6 +5,31 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Auditoria final (3 auditores independentes) — 264 testes
+Relatório completo: [`audit/FINAL_THREE_AGENT_REVIEW.md`](audit/FINAL_THREE_AGENT_REVIEW.md).
+- **Crítico — PIX Woovi**: webhook assinado por outra conta Woovi podia confirmar ou
+  cancelar a transação de outra loja. Agora o webhook é só gatilho: a cobrança precisa
+  ser a da transação e o status é relido na API com o AppID da loja.
+- **Altos**: cópia do anexo no lead apagada pela retenção/anonimização; conversa abre
+  para Atendente sem Vendas; botão "Atualizar agora" das métricas corrigido e restrito;
+  bloco de credenciais globais de WhatsApp (sem efeito) substituído por atalho para
+  Canais.
+- **Filas e concorrência**: claim não reivindica o mesmo item duas vezes; status que
+  chega antes do commit do envio não se perde; lock de agenda cobre a empresa inteira;
+  primeira mensagem simultânea de contato novo não derruba o webhook; índices para
+  saúde/métricas; lock de linha no Woovi e no circuit breaker (uma chamada de teste).
+- **Segurança/LGPD**: anonimização também limpa telefone/e-mail do cliente, prévias de
+  status e valores rastreados; contatos e composição de WhatsApp só para Atendente;
+  canal do contato e contato da conversa imutáveis; "Ollama" em host público é IA
+  externa; limite de corpo também para requisições sem Content-Length.
+- **Atendimento**: "Aguardar cliente" volta para o atendente; transferência do robô
+  inicia SLA e cria atividade; assistente de resposta valida opt-out e variáveis do
+  template; bloquear não grava opt-out; transferência só para atendente da empresa;
+  "Devolver ao robô" exige auto-resposta ligada; rótulos em pt-BR; telas de IA fora do
+  menu técnico.
+- Documentação corrigida (runbooks, SECURITY.md, LGPD.md, ADR-013) com as limitações
+  aceitas registradas.
+
 ### Fase 12 — Documentação
 - **README** reescrito com as garantias reais (entrega *at-least-once*, efeito
   *exactly-once*, status monotônico, "enviada ≠ entregue"), o que ainda não existe

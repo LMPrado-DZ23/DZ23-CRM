@@ -1,7 +1,7 @@
 # Runbook — configuração dos webhooks
 
 Cada **canal de WhatsApp** (DZ23 WhatsApp → Canais) tem uma URL própria com um token
-opaco (campo *URL pública do webhook*, com botão de copiar). A autenticação é **por
+opaco (campo *URL do webhook (provedor)*, com botão de copiar). A autenticação é **por
 canal** e *fail-closed*. Use sempre **HTTPS** e um domínio público.
 
 ## 0. Pré-requisitos
@@ -20,9 +20,9 @@ https://<domínio>/payment/woovi/webhook
 ```
 
 ## 1. Meta — WhatsApp Cloud API
-No canal: `Phone Number ID`, `Token`, `Versão da API`, **`App Secret`** (obrigatório
-para aceitar webhooks), `Verify token` (valor aleatório criado por você) e `WABA ID`
-(para sincronizar templates).
+No canal (aba *Meta Cloud*): `Meta phone_number_id`, `Meta token`, `Meta API version`,
+**`Meta App Secret`** (obrigatório para aceitar webhooks), `Meta verify token` (valor
+aleatório criado por você) e `Meta WABA id` (para sincronizar templates).
 
 No painel da Meta (App → WhatsApp → Configuração):
 1. **Callback URL**: a URL `/meta/webhook/<token>` do canal.
@@ -36,8 +36,8 @@ Validações aplicadas: `X-Hub-Signature-256` (HMAC-SHA256 do corpo com o App Se
 templates** no canal (requer `WABA ID`).
 
 ## 2. Twilio
-No canal: `Account SID`, `Auth Token` e número `from` (`+14155238886` ou o seu número
-aprovado).
+No canal (aba *Twilio*): `Twilio SID` (Account SID), `Twilio token` (Auth Token) e
+`Twilio from` (`+14155238886` ou o seu número aprovado).
 
 Na Twilio (Messaging → WhatsApp sender):
 1. **When a message comes in**: URL `/twilio/webhook/<token>`, método `POST`.
@@ -49,8 +49,9 @@ Token), `AccountSid` e número do canal. Se a assinatura falhar atrás de proxy,
 `dz23.whatsapp.public_base_url` (esquema, domínio e sem barra final).
 
 ## 3. Evolution API (não oficial)
-No canal: `Base URL`, `Instância` e `API key` (administrativa). O canal gera um
-**segredo de callback** próprio, diferente da API key.
+No canal (aba *Evolution*): `Evolution base URL`, `Evolution instance` e
+`Evolution apikey` (administrativa). O canal gera um **segredo de callback** próprio,
+diferente da apikey.
 
 1. Botão **Conectar WhatsApp (QR)** no canal: cria/conecta a instância e configura o
    webhook da Evolution apontando para `/evolution/webhook/<token>`, com o cabeçalho
@@ -72,8 +73,11 @@ newsletters são ignoradas; `fromMe` vira evento de saída, nunca entrada.
 3. No painel Woovi: webhook para `https://<domínio>/payment/woovi/webhook` com os
    eventos de cobrança (paga, expirada, estornada).
 
-Validação: `x-webhook-signature` (RSA-SHA256 do corpo bruto). Eventos são persistidos e
-deduplicados antes de aplicar; a conciliação periódica corrige eventos perdidos.
+Validação: `x-webhook-signature` (RSA-SHA256 do corpo bruto). Como a chave da Woovi é a
+mesma para todas as contas, a assinatura só prova que o evento veio da Woovi: o evento é
+persistido e deduplicado e funciona apenas como **gatilho** — a cobrança precisa ser a da
+transação e o status aplicado é sempre relido na API com o AppID da própria loja. A
+conciliação periódica corrige eventos perdidos.
 
 ## 5. Códigos de resposta (diagnóstico)
 
@@ -91,7 +95,7 @@ deduplicados antes de aplicar; a conciliação periódica corrige eventos perdid
 
 ## 6. Verificação depois de configurar
 1. Envie uma mensagem de teste **do seu próprio número** para o número do canal.
-2. **DZ23 WhatsApp → Saúde dos canais**: `Último webhook` e `Última mensagem recebida`
+2. **DZ23 WhatsApp → Saúde dos canais**: `Último webhook recebido` e `Última mensagem recebida`
    devem atualizar; para Evolution, `Estado da conexão = open`.
 3. Responda pela conversa (Atendimento) e confira em **Outbox** o `Status atual`
    avançar para *entregue*/*lida*. Se ficar em *enviada* por mais de 30 min, a saúde
