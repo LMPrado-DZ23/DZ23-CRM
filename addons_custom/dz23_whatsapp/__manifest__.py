@@ -1,9 +1,9 @@
 # DZ23 CRM — WhatsApp plugável (adaptador por provedor).
 # Provedores: Meta WhatsApp Cloud API, Twilio, Evolution API.
-# Credenciais ficam em ir.config_parameter (servidor), NUNCA no código.
+# Credenciais ficam no dz23.channel (restritas a admin), NUNCA no código.
 {
     "name": "DZ23 CRM — WhatsApp",
-    "version": "19.0.7.0.0",
+    "version": "19.0.8.0.0",
     "summary": "WhatsApp multi-tenant por canal (Meta Cloud API / Twilio / Evolution).",
     "author": "DZ23 (LEANDRO MARCOS PRADO LTDA)",
     "website": "https://www.dz23.com.br",

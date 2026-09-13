@@ -22,6 +22,13 @@
         <field name="global" eval="True"/>
     </record>
 
+    <record id="dz23_message_event_company_rule" model="ir.rule">
+        <field name="name">dz23.message.event: por empresa</field>
+        <field name="model_id" ref="model_dz23_message_event"/>
+        <field name="domain_force">[('company_id','in',company_ids)]</field>
+        <field name="global" eval="True"/>
+    </record>
+
     <record id="dz23_message_outbox_company_rule" model="ir.rule">
         <field name="name">dz23.message.outbox: por empresa</field>
         <field name="model_id" ref="model_dz23_message_outbox"/>

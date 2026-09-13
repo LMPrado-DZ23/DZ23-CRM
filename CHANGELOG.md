@@ -5,6 +5,32 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 1 — Ciclo de vida de mensagem e filas com claim/lease (`dz23_whatsapp` 19.0.8.0.0)
+- **Novo** `dz23.message.event` (append-only, dedupe por canal+id+direção+status,
+  índices por empresa/status, canal/id, outbox/data e pendentes) — ADR-006.
+- **Outbox**: `current_status` monotônico (queued→sent→delivered→read; falha só
+  antes da entrega), `sent_at/delivered_at/read_at/failed_at/last_status_at`,
+  `provider_error_code/message`, `correlation_id`, `client_message_id`,
+  `duration_ms`, estado `sending` + `lease_until`.
+- **Filas** (ADR-003): claim atômico `FOR UPDATE SKIP LOCKED` + lease, commit por
+  item, tentativa contada no claim, recuperação de lease vencido (outbox com id do
+  provedor não é reenviada), orçamento de tempo por execução do cron.
+- **Inbox**: payload JSON **completo** validado (corrige corte em 20.000 caracteres
+  que gerava JSON inválido e mandava a mensagem para a DLQ), `payload_hash`,
+  `payload_preview`, `received_at/processed_at`.
+- **Webhook**: falha ao persistir responde **HTTP 500** (antes 200 com perda
+  silenciosa); log só com metadados.
+- Telas: Eventos de status; ciclo de vida e eventos no formulário da outbox; buscas
+  e filtros de DLQ/retry.
+- Migração 19.0.8.0.0 não destrutiva (backfill de status, correlation_id por linha,
+  hash do payload).
+- Testes: +24 (`test_message_lifecycle`, `test_queue_claim` com dois cursores reais,
+  webhook 500 e reentrega deduplicada). Suíte `dz23`: 65/65.
+
+### CI
+- Jobs `sast`, `odoo-tests`, `deps-container` e `secrets` (PR) corrigidos; actions
+  atualizadas por SHA; ruff 0.16.4.
+
 ### Documentação
 - **Fase 0 — baseline** (`docs/BASELINE_AUDIT.md`, `docs/IMPLEMENTATION_PLAN.md`,
   `docs/diagrams/current-message-flow.mmd`): 27 riscos catalogados com evidência

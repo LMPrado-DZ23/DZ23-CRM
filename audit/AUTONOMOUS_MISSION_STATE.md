@@ -31,8 +31,8 @@ deps-container, odoo-tests) + PRs do dependabot sem falha. 20. 3 auditores: 0 CR
 | Fase | Estado | Commit | Evidência |
 |---|---|---|---|
 | 0 Baseline | DONE | d170085 | smoke 41/41 |
-| CI verde (sast/odoo-tests/trivy) | EXECUTING | — | — |
-| 1 Ciclo de vida + P0 inbox/outbox | PENDING | — | — |
+| CI verde (sast/odoo-tests/trivy) | TESTING (PR #6) | 0352ffe | local: smoke 41/41, bandit/semgrep/trivy limpos; aguardando CI do PR #6 |
+| 1 Ciclo de vida + P0 inbox/outbox | DONE (commit a seguir) | — | smoke 65/65 (dz23_smoke_1272); ruff/bandit limpos; bug real achado e corrigido: flush da recuperação de lease antes do claim SQL |
 | 2 Normalização + webhooks Meta/Twilio/Evolution | PENDING | — | — |
 | 3 Idempotência de efeitos (compra/agenda) | PENDING | — | — |
 | 4 Outbox robusta + filas lógicas | PENDING | — | — |

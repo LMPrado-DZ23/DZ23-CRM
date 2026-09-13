@@ -1,37 +1,54 @@
-# Outbox DURÁVEL de respostas a enviar. O agente ENFILEIRA a resposta aqui
-# (o efeito de negócio já foi aplicado exatamente uma vez pelo inbox); um worker
-# envia com retry exponencial + jitter e DLQ. Evita PERDER a resposta ao cliente
-# quando o provedor (Evolution/Meta/Twilio) está momentaneamente fora (HIGH-01).
+# Outbox DURÁVEL de respostas a enviar. O agente/atendente ENFILEIRA aqui; um
+# worker envia com claim + lease (ADR-003), retry exponencial com jitter e DLQ.
 #
-# GARANTIA DE ENTREGA: at-least-once. Sucesso exige id de mensagem no corpo da
-# resposta do provedor (não só HTTP 2xx). Se o provedor entrega mas o ack se
-# perde (timeout após processar), pode haver reenvio (cliente recebe 2x). Os
-# provedores não recebem idempotency key hoje — LIMITAÇÃO CONHECIDA; mitigar com
-# clientMessageId derivado do outbox.id quando o provedor suportar dedupe.
+# GARANTIA: entrega *at-least-once*. Sucesso exige id de mensagem no corpo da
+# resposta do provedor. Se o worker morrer entre o aceite do provedor e o commit,
+# o lease vence e o item é reenviado (o cliente pode receber 2x) — registrado no
+# erro do item. O CICLO DE VIDA após o envio (delivered/read/failed) vem dos
+# callbacks de status via dz23.message.event, com transições monotônicas (ADR-006).
 import logging
-import secrets
-from datetime import timedelta
+import time
+import uuid
 
 from odoo import api, fields, models
-from odoo.tools import config
 from odoo.tools.translate import _
+
+from .message_event import MESSAGE_STATUSES, STATUS_RANK
+from .queue_utils import (
+    backoff_seconds,
+    can_commit,
+    claim_due,
+    expired_leases,
+    sanitize_error,
+)
 
 _logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 6
 _BATCH = 20
-# Jitter de retry com fonte do SO (evita padrão previsível e o B311 do bandit).
-_JITTER = secrets.SystemRandom()
+_LEASE_SECONDS = 300
+_TIME_BUDGET_SECONDS = 50
+_MARKER_FIELDS = {
+    "sent": "sent_at",
+    "delivered": "delivered_at",
+    "read": "read_at",
+}
+_FAILURE_STATUSES = ("failed", "undelivered", "expired", "cancelled")
 
 
-def _sanitize(msg):
-    """Mensagem de erro curta e sem conteúdo sensível."""
-    return (msg or "")[:200]
+def _extract_provider_message_id(data):
+    data = data if isinstance(data, dict) else {}
+    return (
+        (data.get("key") or {}).get("id")
+        or (data.get("messages") or [{}])[0].get("id")
+        or data.get("sid")
+        or False
+    )
 
 
 class DZ23MessageOutbox(models.Model):
     _name = "dz23.message.outbox"
-    _description = "DZ23 — Outbox durável de respostas (retry + DLQ)"
+    _description = "DZ23 — Outbox durável de respostas (retry + DLQ + ciclo de vida)"
     _order = "id"
 
     channel_id = fields.Many2one("dz23.channel", required=True, ondelete="cascade", index=True)
@@ -40,9 +57,11 @@ class DZ23MessageOutbox(models.Model):
     )
     recipient = fields.Char(required=True, help="Número E.164 do destinatário")
     body = fields.Text(required=True)
+    # Estado do NOSSO envio (fila).
     status = fields.Selection(
         [
             ("pending", "Pendente"),
+            ("sending", "Enviando"),
             ("sent", "Enviada"),
             ("failed", "Falha (retry)"),
             ("dead", "DLQ"),
@@ -54,12 +73,32 @@ class DZ23MessageOutbox(models.Model):
     attempts = fields.Integer(default=0)
     max_attempts = fields.Integer(default=_MAX_ATTEMPTS)
     next_attempt_at = fields.Datetime(default=fields.Datetime.now, index=True)
+    lease_until = fields.Datetime(index=True, readonly=True)
+    duration_ms = fields.Integer(readonly=True, help="Duração da última tentativa de envio.")
     error = fields.Char()
     provider_message_id = fields.Char(
-        readonly=True, help="Id da mensagem confirmado pelo provedor (rastreabilidade)."
+        readonly=True, index=True, help="Id da mensagem confirmado pelo provedor."
     )
+    correlation_id = fields.Char(
+        index=True, readonly=True, copy=False, default=lambda self: uuid.uuid4().hex
+    )
+    client_message_id = fields.Char(
+        readonly=True, copy=False, help="Id enviado ao provedor quando ele suporta."
+    )
+    # Ciclo de vida da mensagem NO PROVEDOR (monotônico, ADR-006).
+    current_status = fields.Selection(
+        MESSAGE_STATUSES, default="queued", required=True, index=True, readonly=True
+    )
+    sent_at = fields.Datetime(readonly=True)
+    delivered_at = fields.Datetime(readonly=True)
+    read_at = fields.Datetime(readonly=True)
+    failed_at = fields.Datetime(readonly=True)
+    last_status_at = fields.Datetime(readonly=True)
+    provider_error_code = fields.Char(readonly=True)
+    provider_error_message = fields.Char(readonly=True)
+    event_ids = fields.One2many("dz23.message.event", "outbox_id", readonly=True)
 
-    # ---------- enfileirar (chamado pelo agente após aplicar o efeito) ----------
+    # ---------- enfileirar ----------
     @api.model
     def _enqueue(self, channel, recipient, body):
         """Persiste a resposta a enviar. Retorna o record (ou vazio se sem corpo)."""
@@ -77,79 +116,178 @@ class DZ23MessageOutbox(models.Model):
 
     # ---------- worker (cron) ----------
     @api.model
-    def _cron_process(self):
-        """Reivindica lote devido com FOR UPDATE SKIP LOCKED e envia."""
-        # next_attempt_at é UTC naive; comparar com clock_timestamp() convertido
-        # para UTC evita erro de fuso quando o TimeZone da sessão PG não é UTC.
-        self.env.cr.execute(
-            """
-            SELECT id FROM dz23_message_outbox
-            WHERE status IN ('pending', 'failed')
-              AND next_attempt_at <= (clock_timestamp() AT TIME ZONE 'utc')
-            ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED
-        """,
-            (_BATCH,),
+    def _cron_process(self, limit=_BATCH):
+        """Recupera leases vencidos, reivindica itens devidos e envia um a um."""
+        self.flush_model()  # o claim é SQL: grava antes o que está pendente no ORM
+        self._recover_expired_leases()
+        # A recuperação escreve via ORM: grava ANTES do UPDATE do claim, senão o
+        # flush tardio sobrescreveria o estado 'sending' do claim.
+        self.flush_model()
+        ids = claim_due(
+            self.env.cr, self._table, ("pending", "failed"), "sending", _LEASE_SECONDS, limit
         )
-        ids = [r[0] for r in self.env.cr.fetchall()]
         if not ids:
             return
-        in_test = config["test_enable"]
+        self.invalidate_model(["status", "attempts", "lease_until"])
+        if can_commit():
+            self.env.cr.commit()
+        started = time.monotonic()
         for rec in self.browse(ids):
+            if time.monotonic() - started > _TIME_BUDGET_SECONDS:
+                rec.write(
+                    {
+                        "status": "pending",
+                        "attempts": max(0, rec.attempts - 1),
+                        "lease_until": False,
+                    }
+                )
+                continue
             rec._process_one()
-            # Commit por registro: se o cron morrer DEPOIS de enviar, o item já
-            # está persistido como 'sent' e NÃO é reenviado (reduz duplicidade —
-            # os provedores de WhatsApp não têm idempotency key nativa). O Odoo
-            # proíbe commit dentro de teste, então pulamos nesse caso (a guarda
-            # de 'sent'/provider_message_id garante o não-reenvio na mesma tx).
-            if not in_test:
+            # Commit por item: um envio confirmado fica 'sent' mesmo que o
+            # worker morra no item seguinte (reduz reenvio).
+            if can_commit():
                 self.env.cr.commit()
+
+    @api.model
+    def _recover_expired_leases(self):
+        """'sending' com lease vencido: com id do provedor => enviado; sem id =>
+        retry (possível reenvio, at-least-once) ou DLQ se esgotou tentativas."""
+        self.flush_model()
+        for rec in self.browse(expired_leases(self.env.cr, self._table, "sending")):
+            if rec.provider_message_id:
+                rec.write({"status": "sent", "lease_until": False, "error": False})
+            elif rec.attempts >= rec.max_attempts:
+                rec.write(
+                    {
+                        "status": "dead",
+                        "lease_until": False,
+                        "error": _("DLQ: lease expirado após %s tentativas") % rec.attempts,
+                    }
+                )
+                rec._apply_status("failed", error_message=rec.error)
+            else:
+                rec.write(
+                    {
+                        "status": "failed",
+                        "lease_until": False,
+                        "next_attempt_at": fields.Datetime.now(),
+                        "error": _(
+                            "Lease expirado sem confirmação do provedor; reenviando "
+                            "(possível mensagem duplicada)."
+                        ),
+                    }
+                )
+                _logger.warning("Outbox %s: lease expirado sem id do provedor.", rec.id)
+
+    def _claim_one(self):
+        self.ensure_one()
+        self.write(
+            {
+                "status": "sending",
+                "attempts": self.attempts + 1,
+                "lease_until": fields.Datetime.add(fields.Datetime.now(), seconds=_LEASE_SECONDS),
+            }
+        )
 
     def _process_one(self):
         self.ensure_one()
         # Guarda: já enviado (id do provedor gravado) não reenvia.
         if self.status == "sent" or self.provider_message_id:
+            if self.status != "sent":
+                self.write({"status": "sent", "lease_until": False})
             return
+        if self.status != "sending":
+            self._claim_one()
+        started = time.monotonic()
         try:
             with self.env.cr.savepoint():
                 data = self.channel_id._processing_self().send_text(self.recipient, self.body)
-                data = data if isinstance(data, dict) else {}
-                mid = (
-                    (data.get("key") or {}).get("id")
-                    or (data.get("messages") or [{}])[0].get("id")
-                    or data.get("sid")
-                )
-                self.write({"status": "sent", "error": False, "provider_message_id": mid or False})
-        except Exception as e:  # noqa: BLE001
-            attempts = self.attempts + 1
-            if attempts >= self.max_attempts:
-                self.write(
-                    {
-                        "status": "dead",
-                        "attempts": attempts,
-                        "error": _("DLQ: %s") % _sanitize(str(e)),
-                    }
-                )
-                _logger.warning("Outbox %s -> DLQ após %s tentativas.", self.id, attempts)
-            else:
-                backoff = min(3600, 2**attempts)
-                delay = backoff + _JITTER.randint(0, max(1, backoff // 2))
-                self.write(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "error": _sanitize("%s: %s" % (type(e).__name__, e)),
-                        "next_attempt_at": fields.Datetime.now() + timedelta(seconds=delay),
-                    }
-                )
+            now = fields.Datetime.now()
+            self.write(
+                {
+                    "status": "sent",
+                    "error": False,
+                    "lease_until": False,
+                    "provider_message_id": _extract_provider_message_id(data),
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                }
+            )
+            self._apply_status("sent", occurred_at=now)
+        except Exception as e:  # noqa: BLE001 - qualquer falha vira retry/DLQ
+            self._register_failure(e, started)
+
+    def _register_failure(self, exc, started):
+        vals = {
+            "lease_until": False,
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        }
+        if self.attempts >= self.max_attempts:
+            vals.update({"status": "dead", "error": _("DLQ: %s") % sanitize_error(exc)})
+            self.write(vals)
+            self._apply_status("failed", error_message=vals["error"])
+            _logger.warning("Outbox %s -> DLQ após %s tentativas.", self.id, self.attempts)
+            return
+        vals.update(
+            {
+                "status": "failed",
+                "error": sanitize_error("%s: %s" % (type(exc).__name__, exc)),
+                "next_attempt_at": fields.Datetime.add(
+                    fields.Datetime.now(), seconds=backoff_seconds(self.attempts)
+                ),
+            }
+        )
+        self.write(vals)
+
+    # ---------- ciclo de vida (ADR-006) ----------
+    def _apply_status(self, status, occurred_at=None, error_code=None, error_message=None):
+        """Aplica um status normalizado de forma MONOTÔNICA, sob lock de linha.
+
+        - só avança quando o rank do novo status é maior que o atual;
+        - falha depois de `delivered` não regride, mas grava o erro;
+        - marcos (sent/delivered/read_at) são fatos: gravados uma vez, mesmo que
+          cheguem fora de ordem.
+        Retorna True se `current_status` mudou.
+        """
+        self.ensure_one()
+        if status not in STATUS_RANK:
+            status = "unknown"
+        self.env.cr.execute(
+            "SELECT id FROM dz23_message_outbox WHERE id = %s FOR UPDATE", (self.id,)
+        )
+        self.invalidate_recordset()
+        occurred = occurred_at or fields.Datetime.now()
+        current = self.current_status or "queued"
+        vals = {}
+        changed = False
+        if status != "unknown" and STATUS_RANK[status] > STATUS_RANK.get(current, 0):
+            vals["current_status"] = status
+            changed = True
+            if status in _FAILURE_STATUSES and not self.failed_at:
+                vals["failed_at"] = occurred
+        marker = _MARKER_FIELDS.get(status)
+        if marker and not self[marker]:
+            vals[marker] = occurred
+        if status in _FAILURE_STATUSES:
+            if error_code:
+                vals["provider_error_code"] = str(error_code)[:64]
+            if error_message:
+                vals["provider_error_message"] = sanitize_error(error_message)
+        if not self.last_status_at or occurred > self.last_status_at:
+            vals["last_status_at"] = occurred
+        if vals:
+            self.write(vals)
+        return changed
 
     def action_requeue(self):
-        """Reprocessa itens da DLQ (ação administrativa auditável)."""
+        """Reenvia itens da DLQ/falha (ação administrativa; registrada em log)."""
         for rec in self:
+            _logger.info("Outbox %s reenfileirado por usuário %s.", rec.id, self.env.uid)
             rec.write(
                 {
                     "status": "pending",
                     "attempts": 0,
                     "next_attempt_at": fields.Datetime.now(),
+                    "lease_until": False,
                     "error": False,
                 }
             )

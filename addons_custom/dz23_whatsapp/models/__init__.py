@@ -1,4 +1,5 @@
 from . import (
+    message_event,
     message_inbox,
     message_outbox,
     res_config_settings,

@@ -33,6 +33,22 @@ def _read_body():
     return (raw, data), None
 
 
+def _persist_inbound(channel, message_id, number, text, data):
+    """Persistência mínima ANTES do 200. Falha => False => HTTP 500, para o
+    provedor reentregar (o dedupe do inbox absorve a reentrega). Loga só metadados."""
+    try:
+        request.env["dz23.message.inbox"].sudo()._enqueue(channel, message_id, number, text, data)
+        return True
+    except Exception as e:  # noqa: BLE001 - converte em 500 controlado
+        _logger.error(
+            "Falha ao persistir inbound canal=%s provider=%s erro=%s",
+            channel.id,
+            channel.provider,
+            type(e).__name__,
+        )
+        return False
+
+
 class DZ23WhatsAppWebhook(http.Controller):
     # ---------------- Evolution (tokenizado, por canal) ----------------
     @http.route(
@@ -68,10 +84,8 @@ class DZ23WhatsAppWebhook(http.Controller):
             # Só PERSISTE no inbox durável (dedupe) e confirma rápido; o worker
             # processa depois. Nunca roda IA/negócio de forma síncrona aqui.
             mid = svc._extract_message_id("evolution", data)
-            try:
-                request.env["dz23.message.inbox"].sudo()._enqueue(channel, mid, number, text, data)
-            except Exception:  # noqa: BLE001 - webhook nunca estoura 500
-                _logger.exception("Falha ao enfileirar inbound Evolution canal=%s", channel.id)
+            if not _persist_inbound(channel, mid, number, text, data):
+                return request.make_response("retry later", status=500)
         return request.make_response("ok")
 
     # ---------------- Meta Cloud (tokenizado, por canal) ----------------
@@ -128,8 +142,6 @@ class DZ23WhatsAppWebhook(http.Controller):
         number, text = svc._parse_meta_inbound(data)
         if number and text:
             mid = svc._extract_message_id("meta_cloud", data)
-            try:
-                request.env["dz23.message.inbox"].sudo()._enqueue(channel, mid, number, text, data)
-            except Exception:  # noqa: BLE001
-                _logger.exception("Falha ao enfileirar inbound Meta canal=%s", channel.id)
+            if not _persist_inbound(channel, mid, number, text, data):
+                return request.make_response("retry later", status=500)
         return request.make_response("ok")
