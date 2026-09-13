@@ -31,9 +31,30 @@
 | ADR-007 | **Camada de normalização** (`dz23.provider.normalizer`): payload de provedor → contrato interno validado antes de gravar | Domínio do CRM não conhece formato Meta/Twilio/Evolution |
 | ADR-008 | **Filas lógicas** (`inbox`, `agent_decision`, `ai_request`, `business_effect`, `outbox`, `status_event`) como estados/crons separados no Postgres | Stack fixa Odoo+PG; sem broker externo |
 
+## Status (branch `feat/crm-evolution`, PR #6)
+
+| Fase | Status | Commit | Evidência |
+|---|---|---|---|
+| 0 Baseline | ✅ | `d170085` | smoke 41/41 |
+| CI verde (sast/odoo-tests/trivy) | ✅ | `0352ffe` | jobs do CI verdes |
+| 1 Ciclo de vida + P0 | ✅ | `621e71b` | smoke 65/65 |
+| 2 Normalização e webhooks | ✅ | `8570ceb` | smoke 96/96 |
+| 3 Idempotência de efeitos | ✅ | `5bdce7a` | smoke 117/117 |
+| 4 Outbox robusta e filas lógicas | ✅ | `8d4a23b` | smoke 131/131 |
+| 5 PIX Woovi | ✅ | `0580496` | smoke 151/151 |
+| 6 Mídia e templates | ✅ | `c050927` | smoke 179/179 |
+| 7 Caixa de atendimento | ✅ | `bcc55b6` | smoke 196/196 |
+| 8 Governança da IA | ✅ | `5a88570` | smoke 217/217 |
+| 9 Observabilidade | ✅ | `79e6497` | smoke 225/225 |
+| 10 LGPD e retenção | ✅ | `716ee26` | smoke 237/237 |
+| 11 Testes | ✅ | `d4cf471` | smoke 249/249 + upgrade |
+| 12 Documentação | ✅ | commit da Fase 12 | este documento e os guias |
+
+Contagens de teste são as do `scripts/smoke.sh` executado no commit indicado.
+
 ## Fases
 
-### Fase 0 — Diagnóstico e baseline ✅ (este commit)
+### Fase 0 — Diagnóstico e baseline ✅
 Entregas: `BASELINE_AUDIT.md`, este plano, diagrama Mermaid. Sem mudança funcional.
 
 ### Fase 1 — Correções P0 + ciclo de vida da mensagem

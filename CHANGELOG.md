@@ -5,6 +5,20 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 12 — Documentação
+- **README** reescrito com as garantias reais (entrega *at-least-once*, efeito
+  *exactly-once*, status monotônico, "enviada ≠ entregue"), o que ainda não existe
+  (envio de mídia) e a contagem de testes com evidência (249 no commit da Fase 11).
+- **ARCHITECTURE.md** atualizado (módulos com dependências e versões reais, fluxo da
+  mensagem em Mermaid, filas, IA, PIX, observabilidade, LGPD); corrigida a licença
+  (MIT, não LGPL-3) e removida credencial de desenvolvimento do texto.
+- **SECURITY.md**: controles por área, limitações assumidas, produção e resposta a
+  incidente.
+- Novos guias: [matriz de integrações](docs/INTEGRATIONS.md),
+  [webhooks](docs/runbooks/webhooks.md), [recuperação de filas](docs/runbooks/queue_recovery.md);
+  índice `docs/README.md` (removido caminho local de máquina) e status das fases no
+  plano de implementação.
+
 ### Fase 11 — Matriz de testes (249 testes)
 - **`docs/TEST_MATRIX.md`**: cada item obrigatório (webhooks, mensagens, agente, PIX,
   multi-tenant, instalação) ligado aos testes que o comprovam.

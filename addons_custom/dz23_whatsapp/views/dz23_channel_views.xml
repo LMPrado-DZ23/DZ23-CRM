@@ -9,6 +9,10 @@
                     <button name="action_evolution_connect" type="object"
                             string="Conectar WhatsApp (QR)" class="btn-primary"
                             icon="fa-qrcode" invisible="provider != 'evolution'"/>
+                    <button name="action_rotate_callback_secret" type="object"
+                            string="Rotacionar segredo de callback" icon="fa-refresh"
+                            groups="base.group_system"
+                            confirm="Gera um novo segredo de callback. Na Evolution o webhook é reconfigurado automaticamente; nos demais provedores o segredo não é usado. Continuar?"/>
                 </header>
                 <sheet>
                     <group>

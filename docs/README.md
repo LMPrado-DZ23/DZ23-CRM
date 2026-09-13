@@ -1,76 +1,52 @@
-# DZ23 CRM (sobre Odoo 19 Community)
+# Documentação do DZ23 CRM
 
-Rebrand/plataforma DZ23 CRM. Base: **Odoo 19 Community (LGPLv3)** — obra
-derivada; a licença e os avisos de copyright da base são mantidos.
+## Comece por aqui
+- [README do projeto](../README.md) — o que é, garantias e instalação.
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — módulos, fluxos e decisões.
+- [SECURITY.md](../SECURITY.md) — controles, limitações e resposta a incidente.
+- [CHANGELOG.md](../CHANGELOG.md) — mudanças por fase e versão de módulo.
 
-## Estrutura
-```
-DZ23-CRM/
-├─ addons_custom/dz23_branding/   # Fase 1 — rebrand/debrand (DZ23 CRM)
-├─ brand/                         # logo original + assets gerados
-├─ docker/                        # ambiente de dev/teste (Odoo 19 + Postgres)
-└─ docs/                          # este README + referência de templates Odoo
-```
+## Operação (runbooks)
+- [Configuração dos webhooks](runbooks/webhooks.md) — Meta, Twilio, Evolution e Woovi.
+- [Recuperação de filas](runbooks/queue_recovery.md) — pendentes, leases, DLQ, pausa por 429.
+- [Backup e restauração](runbooks/backup_restore.md) — inclusive rollback de atualização e reaplicação da LGPD.
+- [Papéis do PostgreSQL](runbooks/postgres_roles.md).
 
-## Subir o ambiente de teste (dev)
-Pré-requisitos: Docker Desktop rodando.
+## Produto e conformidade
+- [Matriz de integrações](INTEGRATIONS.md) — o que cada provedor suporta.
+- [LGPD](LGPD.md) — finalidades, retenção, titular, IA externa.
+- [Matriz de testes](TEST_MATRIX.md) — requisito → teste.
+- [Paridade com open source](OPEN_SOURCE_PARITY_MATRIX.md).
+
+## Decisões de arquitetura (ADRs)
+| ADR | Tema |
+|---|---|
+| [001](adr/ADR-001-tenancy.md) | Multi-empresa (tenancy) |
+| [002](adr/ADR-002-odoo-version-brazil.md) | Versão do Odoo e Brasil |
+| [003](adr/ADR-003-queue-claim-lease.md) | Filas com claim + lease |
+| [004](adr/ADR-004-agenda-sem-dupla-reserva.md) | Agenda sem dupla reserva |
+| [005](adr/ADR-005-business-actions-idempotentes.md) | Ações de negócio idempotentes |
+| [006](adr/ADR-006-message-lifecycle.md) | Ciclo de vida da mensagem |
+| [007](adr/ADR-007-provider-normalization.md) | Normalização por provedor |
+| [008](adr/ADR-008-filas-logicas-e-erros-de-provedor.md) | Filas lógicas e erros de provedor |
+| [009](adr/ADR-009-midia-e-templates.md) | Mídia e templates |
+| [010](adr/ADR-010-caixa-de-atendimento.md) | Caixa de atendimento humano |
+| [011](adr/ADR-011-governanca-de-ia.md) | Governança de IA |
+| [012](adr/ADR-012-observabilidade.md) | Observabilidade |
+| [013](adr/ADR-013-lgpd-retencao.md) | LGPD e retenção |
+
+## Histórico da evolução
+- [Baseline (Fase 0)](BASELINE_AUDIT.md) — diagnóstico antes da evolução.
+- [Plano de implementação](IMPLEMENTATION_PLAN.md) — fases e status.
+- [Diagrama do fluxo original](diagrams/current-message-flow.mmd).
+
+## Ambiente de desenvolvimento
 ```bash
-bash scripts/fetch_oca.sh          # baixa apps OCA (open source) em addons_oca/
-cd docker
-cp ../.env.example ../.env         # e edite as senhas de DEV
-docker compose up -d
-# Primeira vez: criar a base e instalar o stack completo
-docker compose run --rm odoo odoo -d dz23crm \
-  -i base,crm,sale_management,purchase,stock,project,website_sale,mass_mailing,point_of_sale,delivery,stock_delivery,helpdesk_mgmt,contract,sign_oca,fieldservice,dz23_branding,dz23_brasil_tools,dz23_crm,dz23_whatsapp,dz23_payment_woovi,dz23_fiscal,dz23_ai \
-  --load-language=pt_BR --stop-after-init
-docker compose up -d
+bash scripts/fetch_oca.sh            # dependências OCA (pinadas por commit)
+cp .env.example .env                 # senhas de desenvolvimento
+cd docker && docker compose up -d
+bash scripts/smoke.sh                # instalação limpa + testes + upgrade em banco descartável
+python -m ruff check . && python -m ruff format --check .
 ```
-Acesse http://localhost:8069  (base: `dz23crm`).
-
-Reinstalar o branding após mudanças:
-```bash
-docker compose run --rm odoo odoo -d dz23crm -u dz23_branding --stop-after-init
-docker compose restart odoo
-```
-
-## Verificação da Fase 1 (debrand) — checklist
-- [ ] Aba do navegador mostra **DZ23 CRM** (não "Odoo").
-- [ ] Favicon é o emblema DZ23.
-- [ ] Tela de **login**: logo DZ23; rodapé **sem** "Powered by Odoo".
-- [ ] Menu do usuário: **sem** "My Odoo.com Account"; "Ajuda" aponta p/ DZ23.
-- [ ] E-mail de notificação: rodapé **sem** "Powered by Odoo".
-- [ ] Portal do cliente: sidebar **sem** "Powered by Odoo".
-- [ ] Relatório PDF: rodapé com dados do DZ23.
-- [ ] `LICENSE`/`COPYRIGHT` do Odoo intactos (não removidos).
-
-## Apps extras open source (OCA) — equivalentes ao Enterprise
-Os apps que o Odoo mostra com "Upgrade" são do **Enterprise (pagos, código não
-incluído)** — não são desbloqueáveis (seria pirataria). Em vez disso, usamos
-equivalentes **open source da OCA** (grátis, legais):
-
-```bash
-bash scripts/fetch_oca.sh   # baixa os repos OCA (19.0) em addons_oca/
-```
-Já integrados e testados:
-- **Central de Ajuda** → `helpdesk_mgmt` (OCA/helpdesk)
-- **Assinaturas / faturamento recorrente** → `contract` (OCA/contract)
-
-Instale-os junto: acrescente `helpdesk_mgmt,contract` ao `-i` do init. O
-`addons_path` (em `docker/odoo.conf`) já inclui `addons_oca/helpdesk` e
-`addons_oca/contract`. Para mais recursos (assinatura digital, marketing, VoIP),
-adicione o repo OCA correspondente ao `fetch_oca.sh` e ao `addons_path`.
-
-## Docker travando ("An unexpected error occurred")
-Se o Docker Desktop fechar com erro `starting services: initializing Inference
-manager ... dockerInference: The file cannot be accessed`, é um bug do recurso
-**Model Runner / Docker AI (Inference)**, não do projeto. Correções:
-1. Settings → **Features in development** → desmarcar **Docker AI / Model Runner (Inference)**; Apply & Restart.
-2. Se persistir: fechar Docker, apagar `C:\Users\zodyp\AppData\Local\Docker\run\` e reabrir.
-3. Último recurso: **Reset to factory defaults** no próprio diálogo de erro.
-Alternativa sem Docker: instalador oficial Odoo 19 para Windows (.exe) — ver Fase 8.
-
-## Notas
-- **Segredos**: só no `.env` (fora do Git) / Vault do Odoo; em dev, chaves de
-  TESTE. Nunca commitar valores.
-- **Não** editar o core do Odoo — tudo via módulos em `addons_custom/`.
-- Deploy em servidor do DZ23: só com confirmação explícita.
+Regras: nunca editar o núcleo do Odoo; nunca commitar segredos; testes sem rede e sem
+credenciais reais.
