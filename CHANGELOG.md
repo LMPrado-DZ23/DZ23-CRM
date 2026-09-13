@@ -5,6 +5,13 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Documentação
+- **Fase 0 — baseline** (`docs/BASELINE_AUDIT.md`, `docs/IMPLEMENTATION_PLAN.md`,
+  `docs/diagrams/current-message-flow.mmd`): 27 riscos catalogados com evidência
+  `arquivo:linha`, incompatibilidades documentação × código e resultado real das
+  verificações (instalação limpa + 41/41 testes `dz23`, ruff limpo). Correção de
+  termo: a entrega da outbox é *at-least-once*, não "exatamente-uma-vez".
+
 ### Segurança
 - Credenciais de canal (`evo_apikey`, `meta_token`, `callback_secret`, etc.)
   restritas a administrador (`groups="base.group_system"`); envio/webhook leem via `sudo`.
