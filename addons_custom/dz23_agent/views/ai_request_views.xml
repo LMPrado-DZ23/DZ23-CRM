@@ -12,6 +12,7 @@
                 <field name="lead_id"/>
                 <field name="status"/>
                 <field name="used_fallback"/>
+                <field name="guard_triggered" optional="show"/>
                 <field name="attempts"/>
                 <field name="provider"/>
                 <field name="model_name"/>
@@ -42,6 +43,7 @@
                             <field name="max_attempts"/>
                             <field name="next_attempt_at"/>
                             <field name="used_fallback"/>
+                            <field name="guard_triggered"/>
                             <field name="provider"/>
                             <field name="model_name"/>
                             <field name="prompt_version"/>

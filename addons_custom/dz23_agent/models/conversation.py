@@ -1,11 +1,52 @@
-# Conversa de atendimento ligada ao CRM: lead do contato e busca por pedido de venda.
+# Conversa de atendimento ligada ao CRM: lead do contato, busca por pedido de venda e
+# transferência do robô para humano (ADR-011).
 from odoo import api, fields, models
+from odoo.tools.translate import _
+
+HANDOFF_REASONS = [
+    ("sensitive", "Assunto sensível ou pedido de atendente"),
+    ("bot_limit", "Limite de respostas do robô"),
+    ("ai_unavailable", "IA indisponível"),
+]
 
 
 class DZ23ConversationCrm(models.Model):
     _inherit = "dz23.conversation"
 
     lead_id = fields.Many2one(related="contact_id.lead_id", store=True, index=True, string="Lead")
+    bot_turns = fields.Integer("Respostas livres seguidas do robô", default=0, readonly=True)
+    handoff_reason = fields.Selection(
+        HANDOFF_REASONS, string="Transferida pelo robô", readonly=True, tracking=True
+    )
+    handoff_at = fields.Datetime("Transferida em", readonly=True)
+
+    def _agent_handoff(self, reason):
+        """Robô passa a conversa para um humano: fica em silêncio até alguém devolver."""
+        label = dict(HANDOFF_REASONS)[reason]
+        now = fields.Datetime.now()
+        for conversation in self:
+            vals = {
+                "state": "waiting_internal",
+                "handoff_reason": reason,
+                "handoff_at": now,
+                "bot_turns": 0,
+            }
+            if reason == "sensitive" and conversation.priority == "0":
+                vals["priority"] = "1"
+            conversation.write(vals)
+            conversation._note(_("Robô transferiu para atendimento humano: %s.") % label)
+        return True
+
+    def action_take(self):
+        result = super().action_take()
+        self.write({"bot_turns": 0})
+        return result
+
+    def action_release_to_bot(self):
+        result = super().action_release_to_bot()
+        self.write({"bot_turns": 0, "handoff_reason": False, "handoff_at": False})
+        return result
+
     sale_order_ids = fields.Many2many(
         "sale.order",
         string="Pedidos",

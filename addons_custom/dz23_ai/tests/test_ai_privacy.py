@@ -9,6 +9,8 @@ from odoo.tests import TransactionCase, tagged
 class TestAIPrivacy(TransactionCase):
     def setUp(self):
         super().setUp()
+        # A governança (breaker/uso) grava em cursor próprio; em teste, na mesma transação.
+        self.registry_enter_test_mode()
         self.ICP = self.env["ir.config_parameter"].sudo()
 
     def test_external_denied_by_default(self):

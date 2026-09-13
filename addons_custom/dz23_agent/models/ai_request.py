@@ -6,6 +6,11 @@ import logging
 import time
 
 from odoo import api, fields, models
+from odoo.addons.dz23_ai.models.ai_service import (
+    AICircuitOpenError,
+    AIConfigError,
+    AILimitExceededError,
+)
 from odoo.addons.dz23_whatsapp.models.queue_utils import (
     backoff_seconds,
     can_commit,
@@ -22,6 +27,9 @@ _BATCH = 10
 _LEASE_SECONDS = 300  # acima do timeout da IA
 _TIME_BUDGET_SECONDS = 50
 _MAX_BACKOFF_SECONDS = 120  # conversa: não deixar o cliente esperando demais
+# Sem retry: breaker aberto, limite da empresa ou configuração ausente => humano já.
+_NON_RETRYABLE = (AICircuitOpenError, AIConfigError, AILimitExceededError)
+_PURGED_TEXT = "[removido por retenção]"
 
 
 class DZ23AIRequest(models.Model):
@@ -61,6 +69,11 @@ class DZ23AIRequest(models.Model):
     model_name = fields.Char("Modelo", readonly=True)
     prompt_version = fields.Char(readonly=True)
     error = fields.Char(readonly=True)
+    guard_triggered = fields.Boolean(
+        "Guarda acionada",
+        readonly=True,
+        help="A resposta da IA falava de preço/desconto/pagamento e foi trocada por texto fixo.",
+    )
 
     @api.model
     def _enqueue(self, channel, lead, recipient, text, fallback, correlation_id=None):
@@ -110,12 +123,7 @@ class DZ23AIRequest(models.Model):
     def _recover_expired_leases(self):
         for rec in self.browse(expired_leases(self.env.cr, self._table, "processing")):
             if rec.attempts >= rec.max_attempts:
-                rec._deliver(
-                    rec.fallback_text or rec._generic_fallback(),
-                    used_fallback=True,
-                    started=time.monotonic(),
-                    error=_("lease expirado"),
-                )
+                rec._deliver_handoff(_("lease expirado"), time.monotonic())
             else:
                 rec.write(
                     {
@@ -140,6 +148,16 @@ class DZ23AIRequest(models.Model):
     def _generic_fallback():
         return _("Oi! Já vi sua mensagem 😊 Um atendente vai te responder em instantes.")
 
+    def _conversation(self):
+        self.ensure_one()
+        Conversation = self.env["dz23.conversation"].sudo()
+        if not self.lead_id:
+            return Conversation
+        contact = self.channel_id.sudo()._agent_contact_for_lead(self.lead_id)
+        if not contact:
+            return Conversation
+        return Conversation.search([("contact_id", "=", contact.id)], limit=1)
+
     def _process_one(self):
         self.ensure_one()
         if self.status == "done":
@@ -147,32 +165,62 @@ class DZ23AIRequest(models.Model):
         if self.status != "processing":
             self._claim_one()
         started = time.monotonic()
+        conversation = self._conversation()
+        if conversation and not conversation.bot_can_reply():
+            # Humano assumiu (ou o robô transferiu) depois do enfileiramento: silêncio.
+            self.write(
+                {
+                    "status": "done",
+                    "lease_until": False,
+                    "processed_at": fields.Datetime.now(),
+                    "duration_ms": 0,
+                    "error": _("Conversa com atendimento humano; resposta do robô descartada."),
+                }
+            )
+            return
         try:
             with self.env.cr.savepoint():
                 channel = self.channel_id._processing_self()
                 lead = self.lead_id.with_env(channel.env) if self.lead_id else None
                 system = channel._agent_system_prompt(lead) if lead else None
-                reply = (channel.env["dz23.ai"].chat(self.prompt_text, system=system) or "").strip()
+                reply = (
+                    channel.env["dz23.ai"].chat(
+                        self.prompt_text,
+                        system=system,
+                        company=channel.company_id,
+                        purpose="whatsapp_reply",
+                    )
+                    or ""
+                ).strip()
                 if not reply:
                     raise ValueError("IA retornou resposta vazia")
-                self._deliver(reply, used_fallback=False, started=started)
-        except Exception as e:  # noqa: BLE001 - retry e, no fim, fallback
+                reply, guarded = channel._agent_guard_ai_reply(reply)
+                self._deliver(reply, used_fallback=False, started=started, guard_triggered=guarded)
+        except _NON_RETRYABLE as e:
+            self._deliver_handoff(sanitize_error("%s: %s" % (type(e).__name__, e)), started)
+        except Exception as e:  # noqa: BLE001 - retry e, no fim, transferência
             self._register_failure(e, started)
+
+    def _deliver_handoff(self, error, started):
+        """IA indisponível: avisa o cliente e passa a conversa para um humano."""
+        self.ensure_one()
+        conversation = self._conversation()
+        if conversation and conversation.bot_can_reply():
+            conversation._agent_handoff("ai_unavailable")
+            text = self.channel_id._agent_handoff_text()
+        else:
+            text = self.fallback_text or self._generic_fallback()
+        self._deliver(text, used_fallback=True, started=started, error=error)
 
     def _register_failure(self, exc, started):
         if self.attempts >= self.max_attempts:
             _logger.warning(
-                "IA request %s: fallback após %s tentativa(s) (%s).",
+                "IA request %s: transferência após %s tentativa(s) (%s).",
                 self.id,
                 self.attempts,
                 type(exc).__name__,
             )
-            self._deliver(
-                self.fallback_text or self._generic_fallback(),
-                used_fallback=True,
-                started=started,
-                error=sanitize_error("%s: %s" % (type(exc).__name__, exc)),
-            )
+            self._deliver_handoff(sanitize_error("%s: %s" % (type(exc).__name__, exc)), started)
             return
         delay = min(_MAX_BACKOFF_SECONDS, backoff_seconds(self.attempts))
         self.write(
@@ -185,7 +233,7 @@ class DZ23AIRequest(models.Model):
             }
         )
 
-    def _deliver(self, text, used_fallback, started, error=None):
+    def _deliver(self, text, used_fallback, started, error=None, guard_triggered=False):
         """Enfileira a resposta na outbox e fecha o pedido (provedor/modelo auditados)."""
         self.ensure_one()
         self.env["dz23.message.outbox"].sudo()._enqueue(self.channel_id, self.recipient, text)
@@ -194,6 +242,7 @@ class DZ23AIRequest(models.Model):
                 body=_("🤖 Resposta enfileirada para envio: %s") % text
             )
         ai = self.env["dz23.ai"]
+        company = self.channel_id.company_id
         self.write(
             {
                 "status": "done",
@@ -202,9 +251,34 @@ class DZ23AIRequest(models.Model):
                 "duration_ms": int((time.monotonic() - started) * 1000),
                 "response_text": text,
                 "used_fallback": used_fallback,
-                "provider": ai._provider(),
-                "model_name": ai._model(),
+                "guard_triggered": guard_triggered,
+                "provider": ai._provider(company),
+                "model_name": ai._model(company),
                 "prompt_version": self.channel_id._agent_prompt_version(),
                 "error": error or False,
             }
         )
+
+    @api.model
+    def _cron_purge_texts(self):
+        """Retenção (ADR-011): textos de conversa saem do pedido após N dias; os
+        metadados (provedor, modelo, versão do prompt, duração) ficam para auditoria."""
+        param = (
+            self.env["ir.config_parameter"].sudo().get_param("dz23.ai.request_retention_days", "90")
+        )
+        try:
+            days = int(param or 0)
+        except ValueError:
+            days = 90
+        if days <= 0:
+            return 0
+        cutoff = fields.Datetime.subtract(fields.Datetime.now(), days=days)
+        old = self.sudo().search(
+            [
+                ("status", "=", "done"),
+                ("processed_at", "<", cutoff),
+                ("prompt_text", "!=", _PURGED_TEXT),
+            ]
+        )
+        old.write({"prompt_text": _PURGED_TEXT, "response_text": False, "fallback_text": False})
+        return len(old)

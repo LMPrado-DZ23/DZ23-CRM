@@ -5,6 +5,22 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 8 — Governança de IA (`dz23_ai` 19.0.2.0.0, `dz23_agent` 19.0.5.0.0)
+- **Configuração por empresa** (ADR-011): provedor, modelo, política de IA externa
+  (herdar/permitir/negar) e limites de uso diário (chamadas) e mensal (custo US$).
+- **Circuit breaker** por empresa+provedor, **timeout por provedor** e tratamento
+  tipado de **429** com `Retry-After`; tela "Disponibilidade da IA".
+- **Registro de uso** (`dz23.ai.usage`): tokens, custo estimado, duração e status, sem
+  texto de conversa; tela "Uso de IA" com totais.
+- **Transferência para humano**: assunto sensível/pedido de atendente, limite de
+  respostas livres seguidas do robô e IA indisponível levam a conversa para a caixa
+  de Atendimento (mensagem conforme expediente); filtro "Transferidas pelo robô".
+- **A IA não decide negócio**: regras fixas no prompt e guarda de saída que troca
+  resposta com valor/desconto/pagamento/estoque/fiscal/cancelamento por texto fixo.
+- Resposta de IA **descartada se um humano assumiu** antes do worker.
+- Resumo de lead não envia e-mail/telefone para IA externa.
+- **Retenção**: textos da fila de IA anonimizados (90 dias) e uso apagado (400 dias).
+
 ### Fase 7 — Caixa de atendimento humano (`dz23_whatsapp` 19.0.13.0.0, `dz23_agent` 19.0.4.0.0)
 - **Novo app "Atendimento"** (`dz23.conversation`, ADR-010): uma conversa por contato,
   kanban por estado (`open/bot_active/human_active/waiting_customer/waiting_internal/

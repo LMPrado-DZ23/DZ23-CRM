@@ -10,4 +10,15 @@
         <field name="interval_type">minutes</field>
         <field name="active" eval="True"/>
     </record>
+
+    <!-- Retenção (ADR-011): anonimiza textos de pedidos de IA antigos. -->
+    <record id="cron_dz23_ai_request_purge_texts" model="ir.cron">
+        <field name="name">DZ23: retenção dos textos da fila de IA</field>
+        <field name="model_id" ref="model_dz23_ai_request"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_purge_texts()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="True"/>
+    </record>
 </odoo>

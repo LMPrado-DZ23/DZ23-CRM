@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="dz23_ai_usage_view_list" model="ir.ui.view">
+        <field name="name">dz23.ai.usage.list</field>
+        <field name="model">dz23.ai.usage</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" decoration-danger="status != 'ok'">
+                <field name="create_date"/>
+                <field name="company_id"/>
+                <field name="provider"/>
+                <field name="model_name"/>
+                <field name="purpose"/>
+                <field name="status"/>
+                <field name="input_tokens" sum="Entrada"/>
+                <field name="output_tokens" sum="Saída"/>
+                <field name="cost_usd" sum="Custo"/>
+                <field name="duration_ms"/>
+                <field name="error" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_ai_usage_view_search" model="ir.ui.view">
+        <field name="name">dz23.ai.usage.search</field>
+        <field name="model">dz23.ai.usage</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="company_id"/>
+                <field name="provider"/>
+                <field name="purpose"/>
+                <filter name="errors" string="Com falha" domain="[('status', '!=', 'ok')]"/>
+                <group>
+                    <filter name="group_provider" string="Provedor" context="{'group_by': 'provider'}"/>
+                    <filter name="group_day" string="Dia" context="{'group_by': 'create_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dz23_ai_usage_action" model="ir.actions.act_window">
+        <field name="name">Uso de IA</field>
+        <field name="res_model">dz23.ai.usage</field>
+        <field name="view_mode">list</field>
+    </record>
+
+    <record id="dz23_ai_breaker_view_list" model="ir.ui.view">
+        <field name="name">dz23.ai.breaker.list</field>
+        <field name="model">dz23.ai.breaker</field>
+        <field name="arch" type="xml">
+            <list decoration-danger="state == 'open'" decoration-warning="state == 'half_open'">
+                <field name="company_id"/>
+                <field name="provider"/>
+                <field name="state"/>
+                <field name="failure_count"/>
+                <field name="open_until"/>
+                <field name="last_error"/>
+                <field name="last_failure_at"/>
+                <field name="last_success_at"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_ai_breaker_action" model="ir.actions.act_window">
+        <field name="name">Disponibilidade da IA</field>
+        <field name="res_model">dz23.ai.breaker</field>
+        <field name="view_mode">list</field>
+    </record>
+
+    <menuitem id="dz23_ai_menu_root" name="DZ23 IA" parent="base.menu_custom" sequence="90"
+              groups="base.group_system"/>
+    <menuitem id="dz23_ai_usage_menu" name="Uso de IA" parent="dz23_ai_menu_root"
+              action="dz23_ai_usage_action" sequence="10"/>
+    <menuitem id="dz23_ai_breaker_menu" name="Disponibilidade da IA" parent="dz23_ai_menu_root"
+              action="dz23_ai_breaker_action" sequence="20"/>
+</odoo>

@@ -7,6 +7,9 @@
         <field name="arch" type="xml">
             <field name="partner_id" position="after">
                 <field name="lead_id"/>
+                <field name="handoff_reason" invisible="not handoff_reason"/>
+                <field name="handoff_at" invisible="not handoff_at"/>
+                <field name="bot_turns" invisible="not bot_turns"/>
             </field>
             <xpath expr="//notebook" position="inside">
                 <page string="Pedidos" name="orders">
@@ -31,6 +34,8 @@
             <field name="phone" position="after">
                 <field name="lead_id"/>
                 <field name="sale_order_ids" string="Pedido"/>
+                <filter name="bot_handoff" string="Transferidas pelo robô"
+                        domain="[('handoff_reason', '!=', False)]"/>
             </field>
         </field>
     </record>

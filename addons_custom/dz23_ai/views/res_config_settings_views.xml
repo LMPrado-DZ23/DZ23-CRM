@@ -7,7 +7,7 @@
         <field name="arch" type="xml">
             <xpath expr="//form" position="inside">
                 <app string="DZ23 IA" name="dz23_ai">
-                    <block title="Provedor de IA"
+                    <block title="Provedor de IA (padrão global)"
                            help="Local (Ollama) é grátis e sem custo de token. Groq e Gemini têm free-tier. Chaves ficam no servidor.">
                         <setting string="Provedor e modelo">
                             <div class="content-group">
@@ -20,7 +20,7 @@
                             <field name="dz23_ai_ollama_base"/>
                         </setting>
                         <setting string="Privacidade — IA externa (LGPD)"
-                                 help="Provedores externos só funcionam com este consentimento ligado. Dados saem com PII redigida. Local (Ollama) nunca é bloqueado.">
+                                 help="Provedores externos só funcionam com consentimento. Dados saem por allowlist e com PII redigida. Local (Ollama) nunca é bloqueado.">
                             <field name="dz23_ai_external_allowed"/>
                         </setting>
                         <setting string="Chaves de API (opcional)">
@@ -29,6 +29,24 @@
                                 <field name="dz23_ai_google_key" password="True" placeholder="Google Gemini (free-tier)"/>
                                 <field name="dz23_ai_openai_key" password="True" placeholder="OpenAI (pago)"/>
                                 <field name="dz23_ai_anthropic_key" password="True" placeholder="Anthropic (pago)"/>
+                            </div>
+                        </setting>
+                    </block>
+                    <block title="IA desta empresa"
+                           help="Sobrescreve o padrão global para a empresa atual: provedor, consentimento e limites de uso.">
+                        <setting string="Provedor e modelo da empresa">
+                            <div class="content-group">
+                                <field name="dz23_company_ai_provider"/>
+                                <field name="dz23_company_ai_model"/>
+                            </div>
+                        </setting>
+                        <setting string="IA externa nesta empresa">
+                            <field name="dz23_company_ai_external_policy"/>
+                        </setting>
+                        <setting string="Limites de uso" help="0 = sem limite. Ao atingir, o atendimento segue sem IA.">
+                            <div class="content-group">
+                                <field name="dz23_company_ai_daily_call_limit"/>
+                                <field name="dz23_company_ai_monthly_cost_limit_usd"/>
                             </div>
                         </setting>
                     </block>

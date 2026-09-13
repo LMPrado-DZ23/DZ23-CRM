@@ -19,6 +19,17 @@
                         </group>
                     </group>
                 </page>
+                <page string="Governança do robô" name="bot_governance">
+                    <group>
+                        <field name="agent_max_bot_turns"/>
+                    </group>
+                    <div class="text-muted">
+                        Assuntos sensíveis (reclamação, cobrança, cancelamento de compra,
+                        pedido de atendente) e IA indisponível transferem a conversa para a
+                        caixa de Atendimento. A IA nunca decide preço, desconto, estoque,
+                        pagamento, fiscal ou cancelamento.
+                    </div>
+                </page>
             </xpath>
         </field>
     </record>

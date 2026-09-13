@@ -1,17 +1,14 @@
 from odoo import fields, models
 
+from .ai_service import PROVIDERS
+
 
 class ResConfigSettings(models.TransientModel):
     _inherit = "res.config.settings"
 
+    # ----- padrão global (usado quando a empresa não define o seu) -----
     dz23_ai_provider = fields.Selection(
-        selection=[
-            ("ollama", "Local grátis (Ollama) — sem custo de token"),
-            ("groq", "Groq (free-tier)"),
-            ("google", "Google Gemini (free-tier)"),
-            ("openai", "OpenAI (pago)"),
-            ("anthropic", "Anthropic (pago)"),
-        ],
+        selection=PROVIDERS,
         string="Provedor de IA",
         default="ollama",
         config_parameter="dz23.ai_provider",
@@ -21,10 +18,7 @@ class ResConfigSettings(models.TransientModel):
         help="Ex.: llama3.1 (Ollama), llama-3.3-70b-versatile (Groq), gpt-4o-mini…",
         config_parameter="dz23.ai_model",
     )
-    # Gate de privacidade (LGPD): provedores EXTERNOS (Groq/OpenAI/Gemini/
-    # Anthropic) só são usados se este consentimento estiver ligado. Local
-    # (Ollama) nunca é bloqueado. Sem isto, escolher um provedor externo não
-    # funciona — por segurança/privacidade dos dados dos clientes (HIGH-2).
+    # Gate de privacidade (LGPD): provedores EXTERNOS só com consentimento.
     dz23_ai_external_allowed = fields.Boolean(
         "Permitir enviar dados a IA EXTERNA (consentimento/LGPD)",
         help="Ao ligar, você confirma ter base legal para enviar dados (com PII "
@@ -43,4 +37,19 @@ class ResConfigSettings(models.TransientModel):
     dz23_ai_openai_key = fields.Char("OpenAI API key", config_parameter="dz23.ai.openai_key")
     dz23_ai_anthropic_key = fields.Char(
         "Anthropic API key", config_parameter="dz23.ai.anthropic_key"
+    )
+
+    # ----- por empresa (Fase 8) -----
+    dz23_company_ai_provider = fields.Selection(
+        related="company_id.dz23_ai_provider", readonly=False
+    )
+    dz23_company_ai_model = fields.Char(related="company_id.dz23_ai_model", readonly=False)
+    dz23_company_ai_external_policy = fields.Selection(
+        related="company_id.dz23_ai_external_policy", readonly=False
+    )
+    dz23_company_ai_daily_call_limit = fields.Integer(
+        related="company_id.dz23_ai_daily_call_limit", readonly=False
+    )
+    dz23_company_ai_monthly_cost_limit_usd = fields.Float(
+        related="company_id.dz23_ai_monthly_cost_limit_usd", readonly=False
     )

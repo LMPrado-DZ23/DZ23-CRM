@@ -1,4 +1,5 @@
 from . import (
+    agent_governance,
     ai_request,
     channel_contact,
     conversation,

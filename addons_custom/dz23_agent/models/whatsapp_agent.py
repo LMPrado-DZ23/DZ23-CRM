@@ -25,8 +25,8 @@ _logger = logging.getLogger(__name__)
 
 _ORIGIN = "WhatsApp DZ23"
 _PENDING_MINUTES = 30
-_PROMPT_VERSION = "sofia-2026-09-13"
-_LOCAL_AI_PROVIDERS = ("ollama",)
+_PROMPT_VERSION = "sofia-2026-09-13-gov1"
+_FREE_TEXT = object()  # sentinela: mensagem sem intenção determinística
 
 _DEFAULT_PROMPT = (
     "Você é a Sofia, assistente virtual da equipe de atendimento, conversando pelo "
@@ -211,13 +211,10 @@ class DZ23ChannelAgent(models.Model):
 
     def _agent_system_prompt(self, lead):
         base = self.agent_prompt or _DEFAULT_PROMPT
-        blocks = [base, self._agent_business_context()]
+        # Regras de governança são fixas: o prompt do canal não as remove.
+        blocks = [base, self._agent_governance_rules(), self._agent_business_context()]
         # Histórico (chatter = notas internas) só vai para IA LOCAL (on-prem).
-        provider = (
-            self.env["ir.config_parameter"].sudo().get_param("dz23.ai_provider", "ollama")
-            or "ollama"
-        )
-        if provider == "ollama":
+        if not self.env["dz23.ai"]._is_external(self.company_id):
             history = self._agent_history(lead)
             if history:
                 blocks.append(_("Histórico recente da conversa:\n%s") % history)
@@ -430,14 +427,15 @@ class DZ23ChannelAgent(models.Model):
         if not self.agent_prompt:
             return _PROMPT_VERSION
         digest = hashlib.sha256(self.agent_prompt.encode("utf-8")).hexdigest()[:10]
-        return "canal-%s" % digest
+        return "canal-%s-gov1" % digest
 
     def _agent_reply_ai(self, lead, text, fallback, correlation_id=None):
         """Conversa livre com IA FORA do item da inbox (fila dz23.ai.request, ADR-008).
         Retorna None (a resposta sai pelo worker) ou o fallback imediato quando a
         política impede usar IA (provedor externo sem consentimento)."""
         ai = self.env["dz23.ai"]
-        if ai._provider() not in _LOCAL_AI_PROVIDERS and not ai._external_allowed():
+        company = self.company_id
+        if ai._is_external(company) and not ai._external_allowed(company):
             return fallback
         contact = self._agent_contact_for_lead(lead)
         recipient = (contact and contact.provider_user_id) or lead.phone
@@ -471,6 +469,10 @@ class DZ23ChannelAgent(models.Model):
                 "Pronto! Você não vai mais receber mensagens promocionais. "
                 "Se precisar de algo, é só chamar 😊"
             )
+        elif self._agent_is_sensitive(text):
+            # Reclamação, cobrança, cancelamento de compra, pedido de atendente (ADR-011).
+            conversation._agent_handoff("sensitive")
+            reply = self._agent_handoff_text()
         else:
             reply = self._agent_route(contact, lead, text or "", message.get("correlation_id"))
         if reply:
@@ -480,6 +482,26 @@ class DZ23ChannelAgent(models.Model):
         return True
 
     def _agent_route(self, contact, lead, txt, correlation_id=None):
+        conversation = self.env["dz23.conversation"].sudo()._for_contact(contact)
+        reply = self._agent_route_business(contact, lead, txt, correlation_id)
+        if reply is not _FREE_TEXT:
+            if conversation.bot_turns:
+                conversation.bot_turns = 0  # houve avanço determinístico
+            return reply
+        limit = self.agent_max_bot_turns
+        if limit and conversation.bot_turns >= limit:
+            conversation._agent_handoff("bot_limit")
+            return self._agent_handoff_text()
+        conversation.bot_turns += 1
+        return self._agent_reply_ai(
+            lead,
+            txt,
+            _("Oi! Já vi sua mensagem 😊 Me conta o que você precisa que eu te ajudo."),
+            correlation_id,
+        )
+
+    def _agent_route_business(self, contact, lead, txt, correlation_id=None):
+        """Intenções determinísticas; _FREE_TEXT quando nenhuma casa."""
         # 0) resposta a um resumo de compra pendente
         pending = self._handle_pending(contact, lead, txt, correlation_id)
         if pending:
@@ -494,9 +516,7 @@ class DZ23ChannelAgent(models.Model):
             return self._handle_buy(lead, txt, contact=contact)
         if _PRICE_RE.search(txt):
             return self._handle_price(lead, txt)
-        return self._agent_reply_ai(
-            lead, txt, _("Oi! Já vi sua mensagem 😊 Me conta o que você precisa que eu te ajudo.")
-        )
+        return _FREE_TEXT
 
     def _on_media_downloaded(self, media):
         """Arquivo do cliente validado: anexa uma cópia ao lead do contato (o original
