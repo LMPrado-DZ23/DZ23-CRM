@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ===== MÍDIAS ===== -->
+    <record id="dz23_message_media_view_list" model="ir.ui.view">
+        <field name="name">dz23.message.media.list</field>
+        <field name="model">dz23.message.media</field>
+        <field name="arch" type="xml">
+            <list create="false" decoration-danger="status in ('rejected', 'dead')"
+                  decoration-muted="status == 'expired'">
+                <field name="create_date"/>
+                <field name="company_id"/>
+                <field name="channel_id"/>
+                <field name="message_type"/>
+                <field name="filename"/>
+                <field name="mime_type"/>
+                <field name="file_size"/>
+                <field name="status"/>
+                <field name="error" optional="show"/>
+                <button name="action_retry" type="object" string="Tentar de novo" icon="fa-refresh"
+                        invisible="status not in ('failed', 'dead')"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_message_media_view_form" model="ir.ui.view">
+        <field name="name">dz23.message.media.form</field>
+        <field name="model">dz23.message.media</field>
+        <field name="arch" type="xml">
+            <form create="false">
+                <header>
+                    <button name="action_retry" type="object" string="Tentar de novo"
+                            invisible="status not in ('failed', 'dead')"/>
+                    <field name="status" widget="statusbar" statusbar_visible="pending,processing,downloaded"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="company_id"/>
+                            <field name="channel_id"/>
+                            <field name="inbox_id"/>
+                            <field name="provider"/>
+                            <field name="message_type"/>
+                            <field name="attachment_id"/>
+                        </group>
+                        <group>
+                            <field name="filename"/>
+                            <field name="declared_mime"/>
+                            <field name="mime_type"/>
+                            <field name="file_size"/>
+                            <field name="sha256"/>
+                            <field name="downloaded_at"/>
+                            <field name="expires_at"/>
+                            <field name="error"/>
+                        </group>
+                    </group>
+                    <field name="caption"/>
+                    <field name="transcription" placeholder="Transcrição ou descrição do conteúdo…"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dz23_message_media_action" model="ir.actions.act_window">
+        <field name="name">Mídias recebidas</field>
+        <field name="res_model">dz23.message.media</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- ===== TEMPLATES ===== -->
+    <record id="dz23_message_template_view_list" model="ir.ui.view">
+        <field name="name">dz23.message.template.list</field>
+        <field name="model">dz23.message.template</field>
+        <field name="arch" type="xml">
+            <list decoration-success="status == 'approved'" decoration-danger="status == 'rejected'">
+                <field name="channel_id"/>
+                <field name="name"/>
+                <field name="language_code"/>
+                <field name="category"/>
+                <field name="variable_count"/>
+                <field name="status"/>
+                <field name="last_sync_at"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_message_template_view_form" model="ir.ui.view">
+        <field name="name">dz23.message.template.form</field>
+        <field name="model">dz23.message.template</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="channel_id"/>
+                            <field name="name"/>
+                            <field name="language_code"/>
+                            <field name="category"/>
+                        </group>
+                        <group>
+                            <field name="status"/>
+                            <field name="provider_template_id"/>
+                            <field name="variable_count"/>
+                            <field name="last_sync_at"/>
+                        </group>
+                    </group>
+                    <field name="body" placeholder="Olá {{1}}, seu horário é {{2}}."/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dz23_message_template_action" model="ir.actions.act_window">
+        <field name="name">Templates oficiais</field>
+        <field name="res_model">dz23.message.template</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="dz23_message_media_menu" name="Mídias recebidas"
+              parent="dz23_channel_menu_root" action="dz23_message_media_action"
+              sequence="37" groups="base.group_system"/>
+    <menuitem id="dz23_message_template_menu" name="Templates oficiais"
+              parent="dz23_channel_menu_root" action="dz23_message_template_action"
+              sequence="38" groups="base.group_system"/>
+</odoo>

@@ -1,6 +1,7 @@
-# CI open source do DZ23 CRM. Roda em push/PR quando houver remote GitHub.
-# Gates: lint, secret scan, SAST, container/dep scan, SBOM e testes Odoo dos
+# CI open source do DZ23 CRM. Roda em push para main, em PRs e manualmente.
+# Gates: lint, secret scan, SAST, filesystem scan, SBOM e testes Odoo dos
 # módulos customizados num Postgres efêmero. Falha o build em qualquer gate.
+# Actions pinadas por SHA (supply chain); imagens por digest.
 name: CI
 
 on:
@@ -20,27 +21,33 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89 # v4.1.0
         with:
-          version: "0.6.9"
+          version: "0.16.4"
+          args: "--version"
       - run: ruff check .
       - run: ruff format --check .
 
   secrets:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
+          # Exigido pelo gitleaks-action para varrer pull requests.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
 
   sast:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Bandit
         run: pipx run bandit -c pyproject.toml -r addons_custom
       - name: Semgrep
@@ -49,16 +56,17 @@ jobs:
   deps-container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Trivy filesystem (vuln + misconfig + secret)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
+          scanners: vuln,secret,misconfig
           severity: CRITICAL,HIGH
           exit-code: "1"
       - name: SBOM (Syft, SPDX)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: .
           format: spdx-json
@@ -66,6 +74,10 @@ jobs:
 
   odoo-tests:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Dentro do container o shell padrão é sh (dash), sem "set -o pipefail".
+        shell: bash
     services:
       db:
         image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
@@ -73,24 +85,50 @@ jobs:
           POSTGRES_DB: postgres
           POSTGRES_USER: odoo
           POSTGRES_PASSWORD: odoo_ci
-        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U odoo" --health-interval 5s
           --health-timeout 5s --health-retries 10
     container:
       image: odoo:19@sha256:f99ffac95cb39a0924622ea4118481c95651d9c84187e5b30a21c2cc4419c7dd
+      # A imagem roda como usuário "odoo"; os passos do runner (checkout) precisam
+      # escrever em /__w/_temp, que pertence ao root.
+      options: --user root
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Instala módulos DZ23 + roda testes (tag dz23) em DB efêmero
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Instala módulos DZ23 do zero + roda testes (tag dz23) em DB efêmero
         run: |
+          set -o pipefail
           odoo \
             --db_host db --db_user odoo --db_password odoo_ci \
             -d ci_dz23 \
             --addons-path="$GITHUB_WORKSPACE/addons_custom,/usr/lib/python3/dist-packages/odoo/addons" \
+            --data-dir=/tmp/odoo-data \
             --without-demo=all \
             -i dz23_branding,dz23_crm,dz23_ai,dz23_whatsapp,dz23_agent,dz23_payment_woovi,dz23_fiscal,dz23_brasil_tools,dz23_integrations \
             --test-enable --test-tags dz23 \
-            --stop-after-init --log-level=test
+            --workers=0 --max-cron-threads=0 \
+            --stop-after-init --log-level=test 2>&1 | tee /tmp/odoo-tests.log
+      - name: Gate — módulos carregados e zero falhas/erros
+        run: |
+          grep -a "Modules loaded" /tmp/odoo-tests.log
+          grep -aE "odoo.tests.result: 0 failed, 0 error\(s\) of [1-9][0-9]* tests" /tmp/odoo-tests.log
+          if grep -aE "(ERROR|CRITICAL) ci_dz23 " /tmp/odoo-tests.log; then
+            echo "Erros no log do Odoo"; exit 1
+          fi
+      - name: Atualização (-u) dos módulos sobre o banco já instalado
+        run: |
+          set -o pipefail
+          odoo \
+            --db_host db --db_user odoo --db_password odoo_ci \
+            -d ci_dz23 \
+            --addons-path="$GITHUB_WORKSPACE/addons_custom,/usr/lib/python3/dist-packages/odoo/addons" \
+            --data-dir=/tmp/odoo-data \
+            -u dz23_branding,dz23_crm,dz23_ai,dz23_whatsapp,dz23_agent,dz23_payment_woovi,dz23_fiscal,dz23_brasil_tools,dz23_integrations \
+            --workers=0 --max-cron-threads=0 \
+            --stop-after-init 2>&1 | tee /tmp/odoo-upgrade.log
+          grep -a "Modules loaded" /tmp/odoo-upgrade.log
+          if grep -aE "(ERROR|CRITICAL) ci_dz23 " /tmp/odoo-upgrade.log; then
+            echo "Erros na atualização dos módulos"; exit 1
+          fi
         # Nota: módulos OCA (helpdesk_mgmt, contract, sign_oca, fieldservice) não
-        # estão no repo (baixados por scripts/fetch_oca.sh). Para testá-los no CI,
-        # adicione um passo de checkout deles pinado por SHA e inclua no addons-path.
+        # estão no repo (baixados por scripts/fetch_oca.sh).

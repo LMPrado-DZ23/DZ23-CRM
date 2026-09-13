@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="dz23_access_log_company_rule" model="ir.rule">
+        <field name="name">dz23.access.log: por empresa</field>
+        <field name="model_id" ref="model_dz23_access_log"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+        <field name="global" eval="True"/>
+    </record>
+    <record id="dz23_privacy_suppression_company_rule" model="ir.rule">
+        <field name="name">dz23.privacy.suppression: por empresa</field>
+        <field name="model_id" ref="model_dz23_privacy_suppression"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+        <field name="global" eval="True"/>
+    </record>
+</odoo>

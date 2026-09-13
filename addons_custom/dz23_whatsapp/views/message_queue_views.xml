@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Filas duráveis: Inbox (recebidas) e Outbox (respostas), com DLQ visível
-         e botão de reprocessar (item 6 da auditoria de QA). Só admin. -->
+    <!-- Filas duráveis: Inbox (recebidas), Outbox (respostas) e Eventos de status,
+         com DLQ visível e botão de reprocessar. Só admin. -->
 
     <!-- ===== INBOX ===== -->
     <record id="dz23_message_inbox_view_list" model="ir.ui.view">
@@ -9,15 +9,18 @@
         <field name="model">dz23.message.inbox</field>
         <field name="arch" type="xml">
             <list decoration-danger="status == 'dead'" decoration-warning="status == 'failed'"
-                  decoration-muted="status == 'done'">
+                  decoration-info="status == 'processing'" decoration-muted="status == 'done'">
                 <field name="id"/>
                 <field name="company_id"/>
                 <field name="channel_id"/>
                 <field name="provider"/>
                 <field name="sender"/>
                 <field name="status"/>
+                <field name="dlq_reason" optional="show"/>
                 <field name="attempts"/>
+                <field name="received_at"/>
                 <field name="next_attempt_at"/>
+                <field name="duration_ms" optional="hide"/>
                 <field name="error"/>
                 <button name="action_requeue" type="object" string="Reprocessar"
                         icon="fa-refresh" invisible="status not in ('dead','failed')"/>
@@ -33,6 +36,8 @@
                 <header>
                     <button name="action_requeue" type="object" string="Reprocessar"
                             class="btn-primary" invisible="status not in ('dead','failed')"/>
+                    <field name="status" widget="statusbar"
+                           statusbar_visible="pending,processing,done"/>
                 </header>
                 <sheet>
                     <group>
@@ -40,19 +45,55 @@
                             <field name="company_id"/>
                             <field name="channel_id"/>
                             <field name="provider"/>
+                            <field name="message_id"/>
                             <field name="sender"/>
+                            <field name="correlation_id"/>
                         </group>
                         <group>
-                            <field name="status"/>
                             <field name="attempts"/>
                             <field name="max_attempts"/>
+                            <field name="dlq_reason"/>
+                            <field name="received_at"/>
+                            <field name="processed_at"/>
                             <field name="next_attempt_at"/>
+                            <field name="lease_until"/>
+                            <field name="duration_ms"/>
                         </group>
                     </group>
                     <field name="error"/>
-                    <field name="text"/>
+                    <notebook>
+                        <page string="Mensagem">
+                            <field name="text"/>
+                        </page>
+                        <page string="Payload">
+                            <group>
+                                <field name="payload_hash"/>
+                            </group>
+                            <field name="payload_preview"/>
+                        </page>
+                    </notebook>
                 </sheet>
             </form>
+        </field>
+    </record>
+
+    <record id="dz23_message_inbox_view_search" model="ir.ui.view">
+        <field name="name">dz23.message.inbox.search</field>
+        <field name="model">dz23.message.inbox</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="sender"/>
+                <field name="message_id"/>
+                <field name="channel_id"/>
+                <filter name="dlq" string="DLQ" domain="[('status', '=', 'dead')]"/>
+                <filter name="retrying" string="Em retry" domain="[('status', '=', 'failed')]"/>
+                <filter name="pending" string="Pendentes"
+                        domain="[('status', 'in', ('pending', 'processing'))]"/>
+                <group>
+                    <filter name="group_status" string="Status" context="{'group_by': 'status'}"/>
+                    <filter name="group_channel" string="Canal" context="{'group_by': 'channel_id'}"/>
+                </group>
+            </search>
         </field>
     </record>
 
@@ -68,14 +109,17 @@
         <field name="model">dz23.message.outbox</field>
         <field name="arch" type="xml">
             <list decoration-danger="status == 'dead'" decoration-warning="status == 'failed'"
-                  decoration-muted="status == 'sent'">
+                  decoration-info="status == 'sending'" decoration-muted="status == 'sent'">
                 <field name="id"/>
                 <field name="company_id"/>
                 <field name="channel_id"/>
                 <field name="recipient"/>
                 <field name="status"/>
+                <field name="dlq_reason" optional="show"/>
+                <field name="current_status"/>
                 <field name="attempts"/>
-                <field name="next_attempt_at"/>
+                <field name="last_status_at"/>
+                <field name="next_attempt_at" optional="hide"/>
                 <field name="error"/>
                 <button name="action_requeue" type="object" string="Reenviar"
                         icon="fa-refresh" invisible="status not in ('dead','failed')"/>
@@ -91,31 +135,146 @@
                 <header>
                     <button name="action_requeue" type="object" string="Reenviar"
                             class="btn-primary" invisible="status not in ('dead','failed')"/>
+                    <field name="current_status" widget="statusbar"
+                           statusbar_visible="queued,sent,delivered,read"/>
                 </header>
                 <sheet>
                     <group>
-                        <group>
+                        <group string="Envio">
                             <field name="company_id"/>
                             <field name="channel_id"/>
                             <field name="recipient"/>
-                        </group>
-                        <group>
                             <field name="status"/>
+                            <field name="dlq_reason"/>
                             <field name="attempts"/>
                             <field name="max_attempts"/>
                             <field name="next_attempt_at"/>
+                            <field name="lease_until"/>
+                            <field name="duration_ms"/>
+                        </group>
+                        <group string="Ciclo de vida">
+                            <field name="provider_message_id"/>
+                            <field name="correlation_id"/>
+                            <field name="sent_at"/>
+                            <field name="delivered_at"/>
+                            <field name="read_at"/>
+                            <field name="failed_at"/>
+                            <field name="last_status_at"/>
+                            <field name="provider_error_code"/>
+                            <field name="provider_error_message"/>
                         </group>
                     </group>
                     <field name="error"/>
-                    <field name="body"/>
+                    <notebook>
+                        <page string="Mensagem">
+                            <field name="body"/>
+                        </page>
+                        <page string="Eventos">
+                            <field name="event_ids">
+                                <list>
+                                    <field name="occurred_at"/>
+                                    <field name="status"/>
+                                    <field name="provider_status"/>
+                                    <field name="error_code"/>
+                                    <field name="received_at"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
                 </sheet>
             </form>
+        </field>
+    </record>
+
+    <record id="dz23_message_outbox_view_search" model="ir.ui.view">
+        <field name="name">dz23.message.outbox.search</field>
+        <field name="model">dz23.message.outbox</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="recipient"/>
+                <field name="provider_message_id"/>
+                <field name="correlation_id"/>
+                <field name="channel_id"/>
+                <filter name="dlq" string="DLQ" domain="[('status', '=', 'dead')]"/>
+                <filter name="retrying" string="Em retry" domain="[('status', '=', 'failed')]"/>
+                <filter name="undelivered" string="Falha no provedor"
+                        domain="[('current_status', 'in', ('failed', 'undelivered', 'expired', 'cancelled'))]"/>
+                <group>
+                    <filter name="group_status" string="Status" context="{'group_by': 'status'}"/>
+                    <filter name="group_current" string="Ciclo de vida"
+                            context="{'group_by': 'current_status'}"/>
+                </group>
+            </search>
         </field>
     </record>
 
     <record id="dz23_message_outbox_action" model="ir.actions.act_window">
         <field name="name">Outbox (respostas)</field>
         <field name="res_model">dz23.message.outbox</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- ===== EVENTOS ===== -->
+    <record id="dz23_message_event_view_list" model="ir.ui.view">
+        <field name="name">dz23.message.event.list</field>
+        <field name="model">dz23.message.event</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false"
+                  decoration-danger="status in ('failed','undelivered','expired','cancelled')"
+                  decoration-success="status == 'read'">
+                <field name="occurred_at"/>
+                <field name="company_id"/>
+                <field name="channel_id"/>
+                <field name="provider"/>
+                <field name="message_direction"/>
+                <field name="provider_message_id"/>
+                <field name="status"/>
+                <field name="provider_status"/>
+                <field name="error_code"/>
+                <field name="outbox_id"/>
+                <field name="processed" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_message_event_view_form" model="ir.ui.view">
+        <field name="name">dz23.message.event.form</field>
+        <field name="model">dz23.message.event</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="company_id"/>
+                            <field name="channel_id"/>
+                            <field name="provider"/>
+                            <field name="message_direction"/>
+                            <field name="provider_message_id"/>
+                            <field name="outbox_id"/>
+                            <field name="inbox_id"/>
+                        </group>
+                        <group>
+                            <field name="status"/>
+                            <field name="provider_status"/>
+                            <field name="occurred_at"/>
+                            <field name="received_at"/>
+                            <field name="error_code"/>
+                            <field name="error_message"/>
+                            <field name="processed"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="payload_hash"/>
+                    </group>
+                    <field name="payload_preview"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dz23_message_event_action" model="ir.actions.act_window">
+        <field name="name">Eventos de status</field>
+        <field name="res_model">dz23.message.event</field>
         <field name="view_mode">list,form</field>
     </record>
 
@@ -126,4 +285,7 @@
     <menuitem id="dz23_message_outbox_menu" name="Outbox (respostas)"
               parent="dz23_channel_menu_root" action="dz23_message_outbox_action"
               sequence="30" groups="base.group_system"/>
+    <menuitem id="dz23_message_event_menu" name="Eventos de status"
+              parent="dz23_channel_menu_root" action="dz23_message_event_action"
+              sequence="35" groups="base.group_system"/>
 </odoo>

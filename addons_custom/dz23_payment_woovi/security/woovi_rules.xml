@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <!-- Eventos sem transação (ainda não correlacionados) ficam sem empresa. -->
+    <record id="dz23_woovi_event_company_rule" model="ir.rule">
+        <field name="name">dz23.woovi.event: por empresa</field>
+        <field name="model_id" ref="model_dz23_woovi_event"/>
+        <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        <field name="global" eval="True"/>
+    </record>
+</odoo>

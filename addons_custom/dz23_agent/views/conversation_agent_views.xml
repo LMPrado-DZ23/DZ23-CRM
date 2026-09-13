@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="dz23_conversation_view_form_crm" model="ir.ui.view">
+        <field name="name">dz23.conversation.form.crm</field>
+        <field name="model">dz23.conversation</field>
+        <field name="inherit_id" ref="dz23_whatsapp.dz23_conversation_view_form"/>
+        <field name="arch" type="xml">
+            <field name="partner_id" position="after">
+                <field name="lead_id"/>
+                <field name="handoff_reason" invisible="not handoff_reason"/>
+                <field name="handoff_at" invisible="not handoff_at"/>
+                <field name="bot_turns" invisible="not bot_turns"/>
+            </field>
+            <xpath expr="//notebook" position="inside">
+                <page string="Pedidos" name="orders" groups="sales_team.group_sale_salesman">
+                    <field name="sale_order_ids" readonly="1">
+                        <list>
+                            <field name="name"/>
+                            <field name="date_order"/>
+                            <field name="amount_total"/>
+                            <field name="state"/>
+                        </list>
+                    </field>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="dz23_conversation_view_search_crm" model="ir.ui.view">
+        <field name="name">dz23.conversation.search.crm</field>
+        <field name="model">dz23.conversation</field>
+        <field name="inherit_id" ref="dz23_whatsapp.dz23_conversation_view_search"/>
+        <field name="arch" type="xml">
+            <field name="phone" position="after">
+                <field name="lead_id"/>
+                <field name="sale_order_ids" string="Pedido"/>
+                <filter name="bot_handoff" string="Transferidas pelo robô"
+                        domain="[('handoff_reason', '!=', False)]"/>
+            </field>
+        </field>
+    </record>
+</odoo>

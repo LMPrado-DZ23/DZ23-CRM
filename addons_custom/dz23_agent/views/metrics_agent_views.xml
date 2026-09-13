@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="dz23_metrics_daily_view_list_agent" model="ir.ui.view">
+        <field name="name">dz23.metrics.daily.list.agent</field>
+        <field name="model">dz23.metrics.daily</field>
+        <field name="inherit_id" ref="dz23_whatsapp.dz23_metrics_daily_view_list"/>
+        <field name="arch" type="xml">
+            <field name="dlq" position="after">
+                <field name="escalated" sum="Transferidas"/>
+                <field name="quotes" sum="Orçamentos"/>
+                <field name="orders" sum="Pedidos"/>
+                <field name="payments_confirmed" sum="Pagamentos"/>
+                <field name="quote_conversion_rate" optional="show"/>
+                <field name="order_conversion_rate" optional="show"/>
+                <field name="ai_requests" sum="IA" optional="show"/>
+                <field name="ai_fallbacks" sum="IA sem resposta" optional="show"/>
+                <field name="ai_guard_triggered" optional="hide"/>
+                <field name="ai_latency_avg_ms" optional="show"/>
+            </field>
+        </field>
+    </record>
+</odoo>

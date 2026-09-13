@@ -1,120 +1,138 @@
-# DZ23 CRM — Resumo de Arquitetura (para revisão de código)
+# DZ23 CRM — Arquitetura
 
-> Contexto para análise automatizada (Codex/revisor). Descreve o que cada
-> módulo faz, os modelos/fluxos e as dependências externas. Sem segredos.
+> Visão para quem vai manter, revisar ou auditar o código. Decisões detalhadas nos
+> [ADRs](docs/adr/); operação nos [runbooks](docs/runbooks/). Sem segredos.
 
-## 1. O que é
+## 1. Princípios
+- **Odoo 19 Community intocado**: tudo em módulos próprios (`addons_custom/`) que
+  herdam modelos pelo ORM e sobrevivem a atualizações do Odoo.
+- **Sem infraestrutura extra**: filas, locks e deduplicação no PostgreSQL (sem broker,
+  Redis ou Celery).
+- **Garantias com o nome certo**: entrega *at-least-once*, efeito de negócio
+  *exactly-once*, status monotônico, reconciliação por callback.
+- **Multi-empresa por padrão**: cada canal pertence a uma empresa; *record rules*
+  isolam todos os dados derivados.
+- **Determinístico onde há dinheiro ou compromisso**: preço, pedido, agenda e pagamento
+  nunca são decididos pela IA.
 
-**DZ23 CRM** = **Odoo 19.0 Community (LGPLv3)** rebrandado e estendido para
-venda como SaaS pelo DZ23 (LEANDRO MARCOS PRADO LTDA, CNPJ 64.339.333/0001-22).
-Regra de ouro: **nunca editar o core do Odoo** — tudo vive em módulos próprios
-(`addons_custom/`) que herdam/estendem modelos nativos, sobrevivendo a upgrades.
-
-- Base roda como imagem oficial `odoo:19` em Docker (não extrai o fonte do zip).
-- Cores da marca: navy `#003175`, turquesa `#16B1B4`.
-- Idioma padrão pt-BR; moeda BRL; fuso America/Sao_Paulo.
-
-## 2. Runtime / execução
-
+## 2. Runtime
 ```
-docker/docker-compose.yml   → odoo:19 + postgres:16
-  odoo  :8069   monta ../addons_custom → /mnt/extra-addons
-                monta ../addons_oca    → /mnt/oca-addons  (terceiros, NÃO versionado)
-                config ./odoo.conf → /etc/odoo/odoo.conf
-docker/evolution.yml        → Evolution API (WhatsApp não-oficial) + postgres + redis
-docker/odoo.conf            → addons_path, list_db=False, dbfilter=^dz23crm$, workers=2
-scripts/fetch_oca.sh        → git clone -b 19.0 dos módulos OCA
+docker/docker-compose.yml   odoo:19 (digest) + postgres:16 (digest)
+  odoo :8069   addons_custom → /mnt/extra-addons ; addons_oca → /mnt/oca-addons
+docker/evolution.yml        Evolution API (opcional, WhatsApp não oficial)
+scripts/fetch_oca.sh        dependências OCA pinadas por commit
+scripts/smoke.sh            instalação limpa + testes dz23 + upgrade em banco descartável
 ```
 
-DB de dev: `dz23crm` (admin/admin). Backend em `/odoo`, loja em `/shop`.
+## 3. Módulos
 
-> **Dependências OCA fora do zip** (baixadas por `scripts/fetch_oca.sh`):
-> `helpdesk_mgmt`, `contract`, `sign_oca`, `fieldservice`. Se o revisor apontar
-> import/dependência faltando desses nomes, é esperado — não estão no pacote.
+Licença: MIT ([LICENSE](LICENSE); manifestos declaram "Other OSI approved licence").
 
-## 3. Módulos próprios (`addons_custom/`)
+| Módulo | Versão | Depende de | Responsabilidade |
+|---|---|---|---|
+| `dz23_branding` | 19.0.1.0.0 | web, mail, portal | Debrand, tema, PWA/push, pt-BR padrão |
+| `dz23_brasil_tools` | 19.0.1.0.0 | contacts, phone_validation | CNPJ/CEP, feriados, câmbio |
+| `dz23_whatsapp` | 19.0.15.0.0 | mail, phone_validation, sales_team | Canais, webhooks, normalização, inbox/outbox/eventos, mídia, templates, conversas, saúde, métricas, LGPD |
+| `dz23_crm` | 19.0.1.0.0 | crm, dz23_whatsapp | Atalho de WhatsApp no lead |
+| `dz23_ai` | 19.0.2.0.0 | base, mail, crm | Serviço de IA com governança |
+| `dz23_agent` | 19.0.7.0.0 | dz23_whatsapp, dz23_ai, crm, calendar, phone_validation, resource, sale_management | Atendente: intenções, agenda, compra, fila de IA, handoff, métricas de negócio, LGPD do lead |
+| `dz23_payment_woovi` | 19.0.2.0.0 | payment | Provedor PIX Woovi |
+| `dz23_fiscal` | 19.0.1.0.0 | account | NF-e via provedor (fail-closed) |
+| `dz23_integrations` | 19.0.1.0.0 | base_setup, mail | Central de integrações |
 
-Todos `license: 'LGPL-3'`.
+## 4. Fluxo de uma mensagem
 
-| Módulo | Depende de | Função |
-|---|---|---|
-| `dz23_branding` | web, mail, portal | Debrand total (título/favicon/login/e-mail/portal/relatório/PWA/navbar/menu-usuário) + tema navy (SCSS) + `post_init_hook`: pt-BR padrão, OdooBot→"DZ23 Bot", empresa BRL/Brasil |
-| `dz23_brasil_tools` | contacts, crm, base_geolocalize | Autofill CNPJ/CEP + enriquecimento via BrasilAPI (grátis); link wa.me; feriados/câmbio |
-| `dz23_crm` | crm, mail | Ajustes de CRM p/ o nicho; link WhatsApp no lead |
-| `dz23_ai` | base, mail | Serviço IA multi-provedor: `dz23.ai.chat(prompt, system, image_b64)` → dispatch Ollama/OpenAI-compat/Anthropic/Gemini; chaves nos Ajustes |
-| `dz23_whatsapp` | base, mail, crm | Serviço `dz23.whatsapp`: `send_text` (Meta Cloud/Twilio/Evolution) + webhooks de entrada + provisionamento Evolution (cria instância + QR Code) |
-| `dz23_agent` | dz23_whatsapp, dz23_ai, crm, calendar, sale_management, phone_validation | **Cérebro do atendente/vendedor** (ver §4) |
-| `dz23_payment_woovi` | payment | Provider PIX (Woovi): cobrança via API + webhook com verificação de assinatura RSA (fail-closed) |
-| `dz23_fiscal` | account | Botão "Emitir NF-e" → API de provedor terceiro (BLOQUEADO sem cert A1/token — decisão do usuário: só via terceiros) |
-| `dz23_integrations` | base | Hub de 27 integradores (kanban + logos + passo-a-passo p/ pegar cada API), incl. Composio |
-
-## 4. `dz23_agent` — fluxo do atendente (núcleo do produto)
-
-Estende (AbstractModel `_inherit = "dz23.whatsapp"`) e sobrescreve `_on_inbound`.
-Funciona igual para Meta e Evolution (o webhook normaliza número+texto).
-
-```
-Mensagem WhatsApp recebida
-      │
-      ▼
-_agent_find_lead(número)          → acha/cria crm.lead pelo telefone; loga no chatter
-      │
-      ├─ intenção de AGENDA (_SCHED_RE) + data/hora (_agent_parse_datetime)?
-      │     → cria calendar.event (1h)  → sincroniza p/ Google Calendar (módulo google_calendar)
-      │     → responde confirmando
-      │
-      ├─ intenção de COMPRA (_BUY_RE) + produto do catálogo (_agent_match_product)?
-      │     → abre sale.order (rascunho, sem cobrar)  → responde via IA
-      │
-      └─ senão → dz23.ai.chat() com CONTEXTO DINÂMICO do negócio:
-              _agent_system_prompt = prompt base
-                                   + _agent_business_context (empresa + catálogo product.template sale_ok)
-                                   + _agent_history (últimas msgs do chatter = memória)
+```mermaid
+flowchart LR
+  P[Provedor<br/>Meta · Twilio · Evolution] -->|webhook /dz23/whatsapp/&lt;provedor&gt;/webhook/&lt;token&gt;| C[Controller<br/>token → canal · assinatura · limites]
+  C -->|normalizadores ADR-007| N{Contrato interno}
+  N -->|mensagem recebida| I[(dz23.message.inbox)]
+  N -->|status / fromMe| E[(dz23.message.event)]
+  N -->|conexão| CH[dz23.channel]
+  C -->|200 só após persistir · 500 = reentrega| P
+  I -->|cron · claim+lease| A[dz23_agent.handle_inbound]
+  A --> CV[dz23.conversation]
+  A -->|intenção determinística| BA[dz23.business.action<br/>orçamento · pedido · agenda]
+  A -->|conversa livre| AI[(dz23.ai.request)]
+  AI -->|cron| G[dz23.ai.chat<br/>governança]
+  A --> O[(dz23.message.outbox)]
+  AI --> O
+  H[Atendente humano] --> O
+  O -->|cron · claim+lease · erros tipados| P
+  E -->|monotônico| O
 ```
 
-Isso torna o robô **genérico para qualquer ramo** (salão/loja/clínica/serviços):
-ele descreve e vende o que estiver no catálogo daquele tenant. Se a IA estiver
-indisponível, há fallback templated (nunca trava sem resposta).
+### 4.1 Entrada
+1. O token da URL resolve o canal (e a empresa). Autenticação por canal e fail-closed:
+   ausente → 503, inválida → 401, payload de outro canal → 409, corpo > 1 MiB ou
+   > 1000 eventos → 413.
+2. Normalizadores puros convertem o payload no contrato interno; evento fora do contrato
+   é descartado com log saneado.
+3. Mensagem recebida vai para a inbox com dedupe `(provedor, canal, message_id)`;
+   status vão para `dz23.message.event` (append-only, dedupe por
+   canal+id+direção+status). Persistência antes do 200.
 
-Config em Ajustes: `dz23.agent.autoreply` (liga/desliga), `dz23.agent.prompt`
-(personalidade). Todos via `ir.config_parameter` — nada hardcoded.
+### 4.2 Processamento ([ADR-003](docs/adr/ADR-003-queue-claim-lease.md), [ADR-008](docs/adr/ADR-008-filas-logicas-e-erros-de-provedor.md))
+- Crons reivindicam lotes com `FOR UPDATE SKIP LOCKED`, commit do claim, trabalho
+  fora do lock, commit por item. Tentativas contadas no claim; lease vencido é
+  recuperado; esgotado → DLQ com motivo.
+- Filas lógicas: `inbox`, `ai_request`, `business_effect` (ações idempotentes),
+  `outbox`, `status_event`, `media`, eventos Woovi.
 
-## 5. Integração de calendário (agendamento em tempo real)
+### 4.3 Atendente
+- Conversa por contato ([ADR-010](docs/adr/ADR-010-caixa-de-atendimento.md)): com humano
+  no controle o robô só registra.
+- Intenções determinísticas: pendência de compra, cancelar/remarcar/agendar, compra,
+  preço. Efeitos passam por `dz23.business.action._run_once`
+  ([ADR-005](docs/adr/ADR-005-business-actions-idempotentes.md)); agenda com lock
+  consultivo e expediente/feriados do calendário
+  ([ADR-004](docs/adr/ADR-004-agenda-sem-dupla-reserva.md)).
+- Conversa livre vai para a fila de IA; assunto sensível, limite de respostas livres ou
+  IA indisponível transferem para humano; guarda de saída troca valores/condições
+  inventados ([ADR-011](docs/adr/ADR-011-governanca-de-ia.md)).
 
-- `calendar` (nativo): o robô cria `calendar.event`.
-- `google_calendar` (nativo, **instalado**): sync bidirecional. Cron
-  "Google Agenda: sincronização". OAuth em Ajustes (`cal_client_id`/
-  `cal_client_secret`) — **preenchido pelo usuário**, não no código.
+### 4.4 Saída e ciclo de vida
+- Outbox classifica erros do provedor (transitório × permanente), respeita
+  `Retry-After`, pausa o canal em 429 e limita itens por canal por execução.
+- `sent` exige id de mensagem na resposta do provedor. Entregue/lida chegam por
+  callback e só avançam (rank), nunca regridem
+  ([ADR-006](docs/adr/ADR-006-message-lifecycle.md)).
+- Fora da janela de 24 h (Meta/Twilio) só template aprovado
+  ([ADR-009](docs/adr/ADR-009-midia-e-templates.md)).
 
-## 6. Política de segredos (arquitetural, inegociável)
+## 5. IA ([ADR-011](docs/adr/ADR-011-governanca-de-ia.md))
+`dz23.ai.chat(prompt, system, image_b64, company, purpose)`: provedor/política por
+empresa, gate de consentimento, redação de PII, timeout por provedor, 429 tipado,
+circuit breaker e limites; breaker/uso gravados em cursor próprio (sobrevivem ao
+rollback do chamador).
 
-- Código referencia **apenas nomes** de parâmetros (`dz23.ai.*`, `dz23.whatsapp.*`,
-  etc.) lidos de `ir.config_parameter`.
-- Valores reais → só nos Ajustes do Odoo (DB) ou `.env` do servidor. Nunca em
-  git/código/log. `.env.example` versiona apenas os nomes.
-- Webhooks verificam assinatura: Woovi RSA-SHA256 (fail-closed), Meta
-  HMAC-SHA256 `X-Hub-Signature-256`.
+## 6. Pagamento PIX
+`payment.transaction` Woovi cria uma cobrança por transação (reaproveitada);
+`dz23.woovi.event` persiste e deduplica o webhook (RSA) e a conciliação; confirmação
+exige valor e moeda iguais; status monotônico, expiração e estorno.
 
-## 7. Estado verificado (2026-09-05)
+## 7. Observabilidade ([ADR-012](docs/adr/ADR-012-observabilidade.md))
+Saúde do canal calculada na leitura; `dz23.metrics.daily` por canal/dia no fuso da
+empresa; logs `dz23_event=... chave=valor` sem PII.
 
-- 142 módulos carregam limpos; os 9 DZ23 instalam sem erro.
-- WhatsApp testado **AO VIVO** via Evolution: cliente agendou por mensagem real
-  e o robô respondeu + criou o evento (`calendar.event` 2026-09-10 14:30).
-- Venda testada E2E: "quanto custa X?" → abriu orçamento `sale.order`.
-- IA (Ollama llama3.2:1b) responde ao vivo usando o catálogo.
+## 8. LGPD ([ADR-013](docs/adr/ADR-013-lgpd-retencao.md))
+Retenção/anonimização por empresa (pseudônimo HMAC), pedido do titular (exportar/
+anonimizar), supressão por opt-out, auditoria de acesso append-only. Documentos fiscais
+nunca são tocados.
 
-## 8. Bloqueios externos honestos (não são bugs de código)
+## 9. Segurança e segredos
+- Código só referencia nomes de parâmetros; valores ficam no banco (campos restritos a
+  administrador) ou no `.env` do servidor — nunca no Git.
+- Detalhes, limitações e resposta a incidente em [SECURITY.md](SECURITY.md).
 
-- WhatsApp produção business-initiated: templates + verificação Meta (dias–semanas).
-- NF-e ao vivo: certificado e-CNPJ A1 + token do provedor + contador.
-- Woovi/Stripe/Mercado Pago ao vivo: credenciais de produção nos Ajustes.
-- Google Calendar sync real: OAuth Client ID/Secret do Google Cloud nos Ajustes.
-- Áudio↔áudio (STT/TTS) e console de atendimento single-screen (OWL): não implementados.
+## 10. Testes e CI
+- 264 testes com tag `dz23` (sem rede, APIs simuladas, cursores reais para concorrência);
+  mapa requisito → teste em [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md).
+- CI: ruff, gitleaks, bandit, semgrep, trivy, SBOM, instalação limpa + testes + upgrade.
 
-## 9. Pontos que valem revisão do Codex
-
-- Robustez de parsing de data/hora em `dz23_agent` (formatos pt-BR variados).
-- `_agent_match_product`: casamento por substring — pode ser frágil com nomes curtos.
-- Tratamento de rate limit/cache nas chamadas BrasilAPI (`dz23_brasil_tools`).
-- Idempotência dos webhooks (Woovi/Meta/Evolution) contra reentrega.
-- Cobertura de testes automatizados (hoje a verificação é via shell E2E manual).
+## 11. Dependências externas (não são bugs)
+- WhatsApp oficial em produção: aprovação de número e templates pela Meta.
+- NF-e: certificado A1 + conta no provedor.
+- Woovi ao vivo: conta + webhook público HTTPS.
+- Google Agenda: OAuth configurado pelo usuário.
+- Envio de mídia pelo WhatsApp: não implementado.

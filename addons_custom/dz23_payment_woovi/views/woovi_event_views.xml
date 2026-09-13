@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="dz23_woovi_event_view_list" model="ir.ui.view">
+        <field name="name">dz23.woovi.event.list</field>
+        <field name="model">dz23.woovi.event</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false"
+                  decoration-danger="state in ('rejected', 'failed')"
+                  decoration-muted="state == 'ignored'">
+                <field name="received_at"/>
+                <field name="source"/>
+                <field name="event_type"/>
+                <field name="correlation_id"/>
+                <field name="woovi_status"/>
+                <field name="value_cents"/>
+                <field name="transaction_id"/>
+                <field name="state"/>
+                <field name="result"/>
+                <field name="error" optional="show"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_woovi_event_view_form" model="ir.ui.view">
+        <field name="name">dz23.woovi.event.form</field>
+        <field name="model">dz23.woovi.event</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="source"/>
+                            <field name="event_type"/>
+                            <field name="correlation_id"/>
+                            <field name="charge_id"/>
+                            <field name="transaction_id"/>
+                            <field name="company_id"/>
+                        </group>
+                        <group>
+                            <field name="state"/>
+                            <field name="woovi_status"/>
+                            <field name="value_cents"/>
+                            <field name="attempts"/>
+                            <field name="received_at"/>
+                            <field name="processed_at"/>
+                            <field name="result"/>
+                            <field name="error"/>
+                        </group>
+                    </group>
+                    <field name="payload"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dz23_woovi_event_action" model="ir.actions.act_window">
+        <field name="name">Eventos Woovi</field>
+        <field name="res_model">dz23.woovi.event</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

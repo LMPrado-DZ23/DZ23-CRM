@@ -1,4 +1,5 @@
 from odoo import fields, models
+from odoo.exceptions import UserError
 from odoo.tools.translate import _
 
 
@@ -12,14 +13,28 @@ class DZ23WhatsAppCompose(models.TransientModel):
     res_id = fields.Integer()
 
     def action_send(self):
+        """Envio manual pelo canal padrão da empresa, SEMPRE pela outbox (retry, DLQ,
+        status, janela de 24 h) e registrado na conversa de atendimento (ADR-010)."""
         self.ensure_one()
-        # Usa o serviço plugável (Meta/Twilio/Evolution). Erra com mensagem clara se não configurado.
-        self.env["dz23.whatsapp"].send_text(self.number, self.body)
-        # Registra no chatter do registro de origem (lead/contato), se houver.
+        channel = self.env["dz23.whatsapp"]._default_channel()
+        if not channel:
+            raise UserError(_("Nenhum canal de WhatsApp configurado para esta empresa."))
+        if not channel.sudo()._service_window_open(self.number):
+            raise UserError(
+                _(
+                    "Fora da janela de 24 h do WhatsApp: responda pela conversa de "
+                    "atendimento usando um template aprovado."
+                )
+            )
+        conversation = self.env["dz23.conversation"].sudo()._for_number(channel, self.number)
+        if not conversation:
+            raise UserError(_("Número de WhatsApp inválido."))
+        conversation._send_human(body=self.body)
         if self.res_model and self.res_id and self.res_model in self.env.registry:
             rec = self.env[self.res_model].browse(self.res_id)
             if rec.exists() and hasattr(rec, "message_post"):
                 rec.message_post(
-                    body=_("WhatsApp enviado para %s:<br/>%s") % (self.number, self.body)
+                    body=_("WhatsApp enfileirado para %(number)s: %(body)s")
+                    % {"number": self.number, "body": self.body}
                 )
         return {"type": "ir.actions.act_window_close"}

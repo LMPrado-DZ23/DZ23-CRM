@@ -1,0 +1,61 @@
+%% DZ23 CRM — fluxo ATUAL de mensagens e pagamentos (baseline 2026-09-13, commit fd04837)
+%% Linhas tracejadas = lacunas confirmadas no código (ver docs/BASELINE_AUDIT.md).
+flowchart TD
+    subgraph PROV[Provedores externos]
+        EVO[Evolution API<br/>evento MESSAGES_UPSERT]
+        META[Meta Cloud API<br/>messages + statuses]
+        TW[Twilio]
+        WOO[Woovi PIX]
+    end
+
+    subgraph WH[Webhooks HTTP - auth=public, csrf=False]
+        WEVO["POST /dz23/whatsapp/evolution/webhook/&lt;token&gt;<br/>404 token · 503 sem segredo · 401 X-DZ23-Callback<br/>413 corpo · 400 JSON · 409 instância"]
+        WMETA["GET/POST /dz23/whatsapp/meta/webhook/&lt;token&gt;<br/>verify_token · HMAC X-Hub-Signature-256"]
+        WWOO["POST /payment/woovi/webhook<br/>RSA x-webhook-signature · 413"]
+    end
+
+    EVO --> WEVO
+    META --> WMETA
+    TW -. sem webhook de entrada nem status .-> X1((lacuna))
+    WOO --> WWOO
+
+    WEVO --> PARSE_E["_parse_evolution_inbound<br/>só texto · ignora fromMe"]
+    WMETA --> PARSE_M["_parse_meta_inbound<br/>só entry[0].changes[0].messages[0] texto"]
+    WMETA -. statuses descartados .-> X2((lacuna))
+    PARSE_E -. mídia/grupo/status sem tratamento .-> X3((lacuna))
+
+    PARSE_E --> ENQ
+    PARSE_M --> ENQ
+    ENQ["dz23.message.inbox._enqueue<br/>dedupe (provider, channel, message_id)<br/>payload = json[:20000]"]
+    ENQ -->|200 ok mesmo se o enqueue falhar| ACK[Resposta ao provedor]
+
+    ENQ --> INBOX[(dz23_message_inbox<br/>pending/processing/done/failed/dead)]
+    CRONIN["ir.cron 1 min · _cron_process<br/>FOR UPDATE SKIP LOCKED LIMIT 20<br/>lote inteiro numa transação"] --> INBOX
+    CRONIN --> AGENT
+
+    subgraph AG[dz23_agent — dz23.channel.handle_inbound — usuário técnico + escopo da empresa]
+        AGENT[_agent_find_lead<br/>dz23.channel.contact → crm.lead] --> ROUTE{regex}
+        ROUTE -->|_SCHED_RE| SCHED["_handle_schedule<br/>parse data/hora · passado · conflito<br/>SEARCH depois CREATE calendar.event"]
+        ROUTE -->|_BUY_RE| BUY["_handle_buy<br/>match produto → sale.order NOVO a cada mensagem"]
+        ROUTE -->|_PRICE_RE| PRICE[_handle_price<br/>list_price, sem pedido]
+        ROUTE -->|outros| AI["dz23.ai.chat síncrono<br/>timeout 120 s dentro do worker"]
+    end
+
+    SCHED --> OUTQ
+    BUY --> OUTQ
+    PRICE --> OUTQ
+    AI --> OUTQ
+    OUTQ["dz23.message.outbox._enqueue"] --> OUTBOX[(dz23_message_outbox<br/>pending/sent/failed/dead)]
+    CRONOUT["ir.cron 1 min · _cron_process<br/>FOR UPDATE SKIP LOCKED LIMIT 20<br/>cr.commit() por registro"] --> OUTBOX
+    CRONOUT --> SEND["dz23.channel.send_text<br/>Evolution sendText · Meta /messages · Twilio Messages.json<br/>sucesso exige id no corpo"]
+    SEND --> PROV
+    SEND -. sem status delivered/read, sem StatusCallback .-> X4((lacuna))
+
+    subgraph PAY[dz23_payment_woovi]
+        RENDER["payment.transaction._get_specific_rendering_values<br/>POST /charge a CADA renderização"]
+        WWOO --> PROC["_search_by_reference(correlationID)<br/>_process síncrono · sem persistir evento"]
+        PROC --> APPLY{"status"}
+        APPLY -->|COMPLETED/PAID + valor ausente| DONE[_set_done]
+        APPLY -->|EXPIRED| CANC[_set_canceled]
+    end
+    RENDER --> WOO

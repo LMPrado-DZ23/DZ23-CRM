@@ -1,16 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Formulário inline exibido ao cliente: QR Code PIX + copia-e-cola -->
+    <!-- Formulário inline exibido ao cliente: QR Code PIX + copia-e-cola. A mesma
+         cobrança é reutilizada ao recarregar a página; vencida => orienta novo pagamento. -->
     <template id="woovi_inline_form">
         <div class="dz23-woovi-pix text-center">
-            <img t-if="woovi_qr_code_image" t-att-src="woovi_qr_code_image"
-                 alt="PIX QR Code" class="img-fluid mb-2" style="max-width: 220px;"/>
-            <p class="mb-1"><strong>PIX copia e cola</strong></p>
-            <textarea class="form-control" readonly="readonly" rows="3"
-                      t-esc="woovi_br_code"/>
-            <p class="text-muted small mt-2">
-                Pague pelo app do seu banco. A confirmação é automática.
-            </p>
+            <t t-if="woovi_status in ('expired', 'cancelled')">
+                <p class="text-danger mb-1">
+                    Esta cobrança PIX expirou. Volte e gere um novo pagamento.
+                </p>
+            </t>
+            <t t-else="">
+                <img t-if="woovi_qr_code_image" t-att-src="woovi_qr_code_image"
+                     alt="PIX QR Code" class="img-fluid mb-2" style="max-width: 220px;"/>
+                <p class="mb-1"><strong>PIX copia e cola</strong></p>
+                <textarea class="form-control" readonly="readonly" rows="3"
+                          t-esc="woovi_br_code"/>
+                <p t-if="woovi_expires_at" class="text-muted small mt-2">
+                    Válido até <span t-esc="woovi_expires_at"/> (UTC).
+                </p>
+                <p class="text-muted small mt-2">
+                    Pague pelo app do seu banco. A confirmação é automática.
+                </p>
+            </t>
         </div>
     </template>
 </odoo>

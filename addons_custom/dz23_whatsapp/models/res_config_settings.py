@@ -57,6 +57,22 @@ class ResConfigSettings(models.TransientModel):
         "Evolution apikey", config_parameter="dz23.whatsapp.evolution_apikey"
     )
 
+    # Privacidade e retenção (ADR-013) — por empresa
+    dz23_message_retention_days = fields.Integer(
+        related="company_id.dz23_message_retention_days", readonly=False
+    )
+    dz23_event_retention_days = fields.Integer(
+        related="company_id.dz23_event_retention_days", readonly=False
+    )
+    dz23_access_log_retention_days = fields.Integer(
+        related="company_id.dz23_access_log_retention_days", readonly=False
+    )
+    dz23_media_retention_days = fields.Integer(
+        "Retenção de anexos recebidos (dias)",
+        default=180,
+        config_parameter="dz23.whatsapp.media_retention_days",
+    )
+
     def action_dz23_evolution_connect(self):
         """Cria a instância Evolution e abre o assistente com o QR Code."""
         self.ensure_one()

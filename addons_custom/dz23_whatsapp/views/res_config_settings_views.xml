@@ -7,38 +7,32 @@
         <field name="arch" type="xml">
             <xpath expr="//form" position="inside">
                 <app string="DZ23 WhatsApp" name="dz23_whatsapp">
-                    <block title="Provedor e credenciais"
-                           help="Credenciais ficam no servidor; nunca no código. Em dev, use chaves de teste.">
-                        <setting string="Provedor ativo" help="Escolha por onde o WhatsApp é enviado.">
-                            <field name="dz23_whatsapp_provider"/>
+                    <block title="Canais de WhatsApp"
+                           help="Cada empresa tem seus canais (Meta Cloud API, Twilio ou Evolution) com credenciais, webhook e agente próprios.">
+                        <setting string="Configurar canais"
+                                 help="Credenciais, URL do webhook, conexão por QR (Evolution), templates e saúde ficam no próprio canal.">
+                            <button name="%(dz23_whatsapp.dz23_channel_action)d" type="action"
+                                    string="Abrir canais de WhatsApp" class="btn-link" icon="fa-arrow-right"/>
                         </setting>
-                        <setting string="Meta WhatsApp Cloud API"
-                                 help="Oficial. Mensagens iniciadas por você exigem templates aprovados pela Meta.">
-                            <div class="content-group">
-                                <field name="dz23_wa_meta_phone_id" placeholder="phone_number_id"/>
-                                <field name="dz23_wa_meta_token" password="True" placeholder="token permanente"/>
-                                <field name="dz23_wa_meta_version"/>
-                                <field name="dz23_wa_meta_app_secret" password="True" placeholder="App Secret (valida webhook)"/>
-                                <field name="dz23_wa_webhook_verify_token" placeholder="verify token do webhook"/>
-                            </div>
+                    </block>
+                    <block title="Privacidade e retenção (LGPD)"
+                           help="Mensagens, status e auditoria: prazos da EMPRESA ATUAL. Anexos: prazo GLOBAL (todas as empresas). Pedidos, faturas e pagamentos nunca são apagados por estas regras.">
+                        <setting string="Mensagens"
+                                 help="Texto, legenda, payload e telefone de mensagens finalizadas são anonimizados após o prazo. 0 = não anonimizar.">
+                            <field name="dz23_message_retention_days"/>
                         </setting>
-                        <setting string="Twilio (BSP)" help="Você já possui conta Twilio.">
-                            <div class="content-group">
-                                <field name="dz23_wa_twilio_sid" placeholder="Account SID"/>
-                                <field name="dz23_wa_twilio_token" password="True" placeholder="Auth Token"/>
-                                <field name="dz23_wa_twilio_from" placeholder="+14155238886"/>
-                            </div>
+                        <setting string="Payload dos status" help="Prévia do payload dos eventos de entrega/leitura.">
+                            <field name="dz23_event_retention_days"/>
                         </setting>
-                        <setting string="Evolution API (não-oficial)"
-                                 help="Grátis, mas risco de banimento do número — evite como base de SaaS revendido.">
-                            <div class="content-group">
-                                <field name="dz23_wa_evo_base" placeholder="https://evo.seu-dominio.com"/>
-                                <field name="dz23_wa_evo_instance" placeholder="nome-da-instancia (auto)"/>
-                                <field name="dz23_wa_evo_apikey" password="True" placeholder="apikey"/>
-                                <button name="action_dz23_evolution_connect" type="object"
-                                        string="Conectar WhatsApp (gerar QR Code)"
-                                        class="btn-primary mt-2" icon="fa-qrcode"/>
-                            </div>
+                        <setting string="Anexos recebidos (global)" help="Arquivos baixados do WhatsApp, em todas as empresas.">
+                            <field name="dz23_media_retention_days"/>
+                        </setting>
+                        <setting string="Auditoria de acesso">
+                            <field name="dz23_access_log_retention_days"/>
+                        </setting>
+                        <setting string="Pedido do titular" help="Exportar ou anonimizar os dados de um telefone.">
+                            <button name="%(dz23_whatsapp.dz23_privacy_request_action)d" type="action"
+                                    string="Abrir pedido do titular" class="btn-link" icon="fa-user-secret"/>
                         </setting>
                     </block>
                 </app>

@@ -2,9 +2,11 @@
 # (Não empacota Python — os módulos são addons Odoo. Só centraliza config.)
 
 [tool.bandit]
-# Varre nossos addons; ignora caches e OCA de terceiros.
-exclude_dirs = ["addons_oca", "docs", "**/__pycache__", "**/tests"]
-# B101 (assert) e B311 (random) não se aplicam ao nosso caso de uso.
+# Varre o código de produção dos addons. Ignora OCA de terceiros, docs, caches e
+# testes (fixtures usam credenciais FALSAS de propósito). O bandit compara padrões
+# fnmatch contra o caminho do arquivo: "**/tests" não casa; "*/tests/*" casa.
+exclude_dirs = ["addons_oca", "docs", "*/__pycache__/*", "*/tests/*"]
+# B101 (assert) não se aplica (Odoo usa assert só em testes).
 skips = ["B101"]
 
 [tool.bandit.assert_used]

@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_dz23_ai_usage_manager,dz23.ai.usage.manager,model_dz23_ai_usage,base.group_system,1,1,1,1
+access_dz23_ai_breaker_manager,dz23.ai.breaker.manager,model_dz23_ai_breaker,base.group_system,1,1,1,1

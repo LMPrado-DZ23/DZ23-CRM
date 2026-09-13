@@ -12,7 +12,7 @@
                        invisible="not dz23_whatsapp_link"/>
                 <button name="action_dz23_send_whatsapp" type="object"
                         string="Enviar WhatsApp" class="btn-link ps-0"
-                        icon="fa-whatsapp"/>
+                        icon="fa-whatsapp" groups="dz23_whatsapp.group_dz23_attendant"/>
             </xpath>
         </field>
     </record>

@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Saúde dos canais (ADR-012) -->
+    <record id="dz23_channel_view_list_health" model="ir.ui.view">
+        <field name="name">dz23.channel.list.health</field>
+        <field name="model">dz23.channel</field>
+        <field name="priority">30</field>
+        <field name="arch" type="xml">
+            <list string="Saúde dos canais" create="false">
+                <field name="name"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="provider"/>
+                <field name="health_state" widget="badge"
+                       decoration-success="health_state == 'ok'"
+                       decoration-warning="health_state == 'warning'"
+                       decoration-danger="health_state == 'critical'"/>
+                <field name="connection_state" optional="show"/>
+                <field name="last_webhook_at"/>
+                <field name="last_inbound_at" optional="show"/>
+                <field name="last_sent_at"/>
+                <field name="last_status_at"/>
+                <field name="oldest_inbox_pending_at" optional="show"/>
+                <field name="oldest_outbox_pending_at" optional="show"/>
+                <field name="dlq_inbox_count" optional="show"/>
+                <field name="dlq_outbox_count" optional="show"/>
+                <field name="dlq_media_count" optional="hide"/>
+                <field name="health_notes" optional="show"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_channel_health_action" model="ir.actions.act_window">
+        <field name="name">Saúde dos canais</field>
+        <field name="res_model">dz23.channel</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_ids" eval="[(5, 0, 0),
+            (0, 0, {'view_mode': 'list', 'view_id': ref('dz23_channel_view_list_health')}),
+            (0, 0, {'view_mode': 'form', 'view_id': ref('dz23_channel_view_form')})]"/>
+    </record>
+
+    <!-- Métricas diárias -->
+    <record id="dz23_metrics_daily_view_list" model="ir.ui.view">
+        <field name="name">dz23.metrics.daily.list</field>
+        <field name="model">dz23.metrics.daily</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <header>
+                    <button name="action_refresh_metrics" type="object" string="Atualizar agora"
+                            class="btn-secondary" display="always"/>
+                </header>
+                <field name="day"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="channel_id"/>
+                <field name="provider" optional="show"/>
+                <field name="received" sum="Recebidas"/>
+                <field name="sent" sum="Enviadas"/>
+                <field name="delivered" sum="Entregues"/>
+                <field name="read_count" sum="Lidas"/>
+                <field name="delivery_rate"/>
+                <field name="read_rate"/>
+                <field name="failed" sum="Falhas"/>
+                <field name="dlq" sum="DLQ"/>
+                <field name="first_response_avg_min" optional="show"/>
+                <field name="webhook_latency_avg_s" optional="show"/>
+                <field name="queue_age_max_min" optional="hide"/>
+                <field name="computed_at" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_metrics_daily_view_pivot" model="ir.ui.view">
+        <field name="name">dz23.metrics.daily.pivot</field>
+        <field name="model">dz23.metrics.daily</field>
+        <field name="arch" type="xml">
+            <pivot string="Métricas">
+                <field name="day" type="row" interval="day"/>
+                <field name="channel_id" type="col"/>
+                <field name="received" type="measure"/>
+                <field name="sent" type="measure"/>
+                <field name="delivery_rate" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="dz23_metrics_daily_view_graph" model="ir.ui.view">
+        <field name="name">dz23.metrics.daily.graph</field>
+        <field name="model">dz23.metrics.daily</field>
+        <field name="arch" type="xml">
+            <graph string="Métricas" type="line">
+                <field name="day" interval="day"/>
+                <field name="sent" type="measure"/>
+                <field name="received" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="dz23_metrics_daily_view_search" model="ir.ui.view">
+        <field name="name">dz23.metrics.daily.search</field>
+        <field name="model">dz23.metrics.daily</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="channel_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="provider"/>
+                <filter name="filter_day" string="Dia" date="day"/>
+                <filter name="with_dlq" string="Com DLQ" domain="[('dlq', '>', 0)]"/>
+                <group>
+                    <filter name="group_channel" string="Canal" context="{'group_by': 'channel_id'}"/>
+                    <filter name="group_provider" string="Provedor" context="{'group_by': 'provider'}"/>
+                    <filter name="group_company" string="Empresa" context="{'group_by': 'company_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dz23_metrics_daily_action" model="ir.actions.act_window">
+        <field name="name">Métricas de atendimento</field>
+        <field name="res_model">dz23.metrics.daily</field>
+        <field name="view_mode">list,pivot,graph</field>
+    </record>
+
+    <menuitem id="dz23_channel_health_menu" name="Saúde dos canais"
+              parent="dz23_channel_menu_root" action="dz23_channel_health_action"
+              sequence="5" groups="base.group_system"/>
+    <menuitem id="dz23_metrics_daily_menu" name="Métricas"
+              parent="dz23_channel_menu_root" action="dz23_metrics_daily_action"
+              sequence="6" groups="base.group_system"/>
+    <menuitem id="dz23_metrics_daily_menu_attendance" name="Métricas"
+              parent="dz23_conversation_menu_root" action="dz23_metrics_daily_action"
+              sequence="50" groups="dz23_whatsapp.group_dz23_supervisor"/>
+</odoo>

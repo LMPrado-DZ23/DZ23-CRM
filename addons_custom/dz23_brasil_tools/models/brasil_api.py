@@ -18,6 +18,11 @@ def only_digits(value):
     return re.sub(r"\D", "", value or "")
 
 
+def _route(url):
+    """Rota consultada sem query e sem os identificadores (CNPJ/CEP/ano)."""
+    return re.sub(r"\d+", "#", (url or "").split("?", 1)[0])
+
+
 class DZ23BrasilApi(models.AbstractModel):
     _name = "dz23.brasil.api"
     _description = "DZ23 — Serviço de APIs públicas do Brasil (BrasilAPI/OSM)"
@@ -36,14 +41,15 @@ class DZ23BrasilApi(models.AbstractModel):
         except requests.exceptions.Timeout:
             raise UserError(_("A consulta demorou demais (timeout). Tente novamente.")) from None
         except requests.exceptions.RequestException as e:
-            _logger.warning("DZ23 BrasilAPI erro de rede: %s", e)
+            # Sem a exceção crua: ela traz a URL com CNPJ/CEP consultado (dado pessoal).
+            _logger.warning("DZ23 BrasilAPI erro de rede (%s) em %s", type(e).__name__, _route(url))
             raise UserError(
                 _("Não foi possível consultar a API agora. Verifique a conexão.")
             ) from None
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:
-            _logger.info("DZ23 BrasilAPI status %s para %s", resp.status_code, url)
+            _logger.info("DZ23 BrasilAPI status %s em %s", resp.status_code, _route(url))
             raise UserError(
                 _("Consulta não encontrada ou inválida (código %s).") % resp.status_code
             )

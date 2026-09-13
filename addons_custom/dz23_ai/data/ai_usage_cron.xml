@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <!-- Retenção do registro de uso de IA (ADR-011). -->
+    <record id="cron_dz23_ai_usage_purge" model="ir.cron">
+        <field name="name">DZ23: retenção do uso de IA</field>
+        <field name="model_id" ref="model_dz23_ai_usage"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_purge()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="True"/>
+    </record>
+</odoo>

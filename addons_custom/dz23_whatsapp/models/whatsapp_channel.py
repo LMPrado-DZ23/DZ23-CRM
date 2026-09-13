@@ -2,17 +2,31 @@
 # (company_id) e carrega as PRÓPRIAS credenciais + prompt do agente — nada de
 # ir.config_parameter global. O webhook resolve o canal por um token opaco e
 # autentica por canal. Todo o processamento roda no escopo da empresa do canal.
+import base64
+import binascii
+import json
 import logging
 import re
 import secrets
+from datetime import timedelta
 
 import requests
 from odoo import api, fields, models
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.translate import _
 
+from .media_utils import MediaRejectedError, is_allowed_download_url
+from .provider_errors import (
+    ProviderPermanentError,
+    ProviderTransientError,
+    classify_http_error,
+)
+from .provider_normalizers import validate_event
+
 _logger = logging.getLogger(__name__)
 _TIMEOUT = 15
+_SERVICE_WINDOW = timedelta(hours=24)
+_MEDIA_ID_RE = re.compile(r"^[\w.\-]+$")
 
 
 def _digits(v):
@@ -133,10 +147,38 @@ class DZ23Channel(models.Model):
     meta_api_version = fields.Char("Meta API version", default="v20.0")
     meta_app_secret = fields.Char("Meta App Secret", groups="base.group_system")
     meta_verify_token = fields.Char("Meta verify token", groups="base.group_system")
+    meta_waba_id = fields.Char(
+        "Meta WABA id", help="Conta WhatsApp Business: usada para sincronizar templates."
+    )
     # Twilio
     twilio_sid = fields.Char("Twilio SID")
     twilio_token = fields.Char("Twilio token", groups="base.group_system")
     twilio_from = fields.Char("Twilio from")
+
+    # Saúde do canal (atualizada pelos webhooks)
+    connection_state = fields.Char(
+        "Estado da conexão", readonly=True, help="Último estado informado pelo provedor."
+    )
+    connection_state_at = fields.Datetime("Estado atualizado em", readonly=True)
+    last_webhook_at = fields.Datetime("Último webhook recebido", readonly=True)
+    rate_limited_until = fields.Datetime(
+        "Envio pausado até",
+        readonly=True,
+        help="Preenchido quando o provedor responde 429: a outbox não envia por este "
+        "canal até esse horário (respeita Retry-After).",
+    )
+    # Caixa de atendimento (ADR-010)
+    sla_first_response_minutes = fields.Integer(
+        "SLA de 1ª resposta (min)",
+        default=15,
+        help="Prazo para responder uma nova mensagem do cliente (0 = sem SLA).",
+    )
+    public_webhook_url = fields.Char(
+        "URL do webhook (provedor)",
+        compute="_compute_public_webhook_url",
+        groups="base.group_system",
+        help="Configure esta URL no provedor. Contém o token opaco do canal.",
+    )
 
     # Agente — o valor é POR CANAL; os Ajustes globais só definem o PADRÃO
     # aplicado a canais NOVOS (evita o controle enganoso apontado no QA).
@@ -160,6 +202,14 @@ class DZ23Channel(models.Model):
         "unique(provider, provider_channel_id)",
         "Já existe um canal com esse provedor e identificador.",
     )
+
+    @api.depends("provider", "webhook_token")
+    def _compute_public_webhook_url(self):
+        kinds = {"evolution": "evolution", "meta_cloud": "meta", "twilio": "twilio"}
+        for ch in self:
+            ch.public_webhook_url = (
+                ch._public_webhook_url(kinds[ch.provider]) if ch.webhook_token else False
+            )
 
     @api.depends("provider", "evo_instance", "meta_phone_id", "twilio_from")
     def _compute_provider_channel_id(self):
@@ -237,14 +287,106 @@ class DZ23Channel(models.Model):
             allowed_company_ids=[self.company_id.id]
         )
 
+    # ---------- ingestão de webhooks normalizados (ADR-007) ----------
+    def _ingest_events(self, events):
+        """Roteia eventos do contrato interno: mensagem recebida -> inbox;
+        status e mensagens enviadas (fromMe) -> dz23.message.event; conexão ->
+        estado do canal. Evento fora do contrato é descartado com log sem PII.
+        Erros de persistência PROPAGAM (o webhook responde 500)."""
+        self.ensure_one()
+        channel = self.sudo()
+        Inbox = self.env["dz23.message.inbox"].sudo()
+        Event = self.env["dz23.message.event"].sudo()
+        stats = {"inbox": 0, "events": 0, "ignored": 0, "invalid": 0}
+        for event in events or []:
+            try:
+                validate_event(event)
+            except ValueError as e:
+                from .queue_utils import sanitize_error
+
+                stats["invalid"] += 1
+                _logger.warning(
+                    "Evento descartado (contrato) canal=%s motivo=%s", channel.id, sanitize_error(e)
+                )
+                continue
+            if event["kind"] == "connection":
+                channel._apply_connection_state(event)
+                stats["events"] += 1
+            elif event["kind"] == "message" and event["direction"] == "inbound":
+                if event["message_type"] == "reaction":
+                    stats["ignored"] += 1
+                    continue
+                Inbox._enqueue_event(channel, event)
+                stats["inbox"] += 1
+            else:
+                status = event["status"]
+                if event["kind"] == "message" and status == "unknown":
+                    status = "sent"  # mensagem enviada por nós/pelo aparelho
+                Event._record(channel, dict(event, status=status))
+                stats["events"] += 1
+        channel._touch_webhook()
+        return stats
+
+    def _touch_webhook(self):
+        """Marca o último webhook (no máximo 1 escrita/min por canal: evita
+        contenção de linha sob rajada de callbacks)."""
+        self.env.cr.execute(
+            """
+            UPDATE dz23_channel
+               SET last_webhook_at = (now() AT TIME ZONE 'utc')
+             WHERE id = %s
+               AND (last_webhook_at IS NULL
+                    OR last_webhook_at < (now() AT TIME ZONE 'utc') - interval '60 seconds')
+            """,
+            (self.id,),
+        )
+        self.invalidate_recordset(["last_webhook_at"])
+
+    def _apply_connection_state(self, event):
+        occurred = event.get("occurred_at") or fields.Datetime.now()
+        if self.connection_state_at and occurred < self.connection_state_at:
+            return  # estado atrasado não sobrescreve o mais recente
+        self.write({"connection_state": event["state"], "connection_state_at": occurred})
+        _logger.info("Canal %s: conexão %s", self.id, event["state"])
+
+    # ---------- Twilio: validação do callback ----------
+    def _twilio_signature_urls(self, request_url):
+        """URLs candidatas para a assinatura: a pública configurada (atrás de
+        proxy) e a vista pelo servidor. A assinatura continua exigindo o token."""
+        self.ensure_one()
+        urls = [self._public_webhook_url("twilio")]
+        if request_url and request_url not in urls:
+            urls.append(request_url)
+        return urls
+
+    def _twilio_payload_matches(self, params, events):
+        """O callback precisa ser da conta e do número deste canal."""
+        self.ensure_one()
+
+        def first(name):
+            value = params.get(name)
+            return (value[0] if value else None) if isinstance(value, list) else value
+
+        account = first("AccountSid")
+        if account and account != self.twilio_sid:
+            return False
+        ours = _digits(self.twilio_from)
+        for event in events:
+            number = event.get("recipient") if event["kind"] == "message" else None
+            if event["kind"] == "status":
+                number = _digits(str(first("From") or "").replace("whatsapp:", ""))
+            if ours and number and number != ours:
+                return False
+        return True
+
     # ---------- envio ----------
-    def send_text(self, number, body):
+    def send_text(self, number, body, correlation_id=None):
         self.ensure_one()
         to = _e164_br(number)
         if not to:
-            raise UserError(_("Número de WhatsApp inválido."))
+            raise ProviderPermanentError(_("Número de WhatsApp inválido."))
         if not body:
-            raise UserError(_("Mensagem vazia."))
+            raise ProviderPermanentError(_("Mensagem vazia."))
         # Credenciais do canal são restritas a admin (groups=group_system); o
         # envio roda como usuário técnico (bot) — por isso lê via sudo() aqui.
         channel = self.sudo()
@@ -252,25 +394,42 @@ class DZ23Channel(models.Model):
             "evolution": channel._send_evolution,
             "meta_cloud": channel._send_meta_cloud,
             "twilio": channel._send_twilio,
-        }[channel.provider](to, body)
+        }[channel.provider](to, body, correlation_id=correlation_id)
 
     def _post(self, url, **kwargs):
+        """POST ao provedor. Levanta ProviderTransientError/ProviderPermanentError
+        (ADR-008); loga só canal, status e código (nunca corpo/URL com dados)."""
         try:
             resp = requests.post(url, timeout=_TIMEOUT, **kwargs)
         except requests.exceptions.RequestException as e:
-            _logger.warning("DZ23 WhatsApp erro de rede: %s", e)
-            raise UserError(_("Falha de rede ao enviar WhatsApp.")) from None
+            _logger.warning(
+                "DZ23 WhatsApp erro de rede canal=%s tipo=%s", self.id, type(e).__name__
+            )
+            raise ProviderTransientError(
+                _("Falha de rede ao enviar WhatsApp (%s).") % type(e).__name__
+            ) from None
         if resp.status_code >= 400:
-            _logger.info("DZ23 WhatsApp %s -> %s", url, resp.status_code)
-            raise UserError(_("O provedor recusou o envio (código %s).") % resp.status_code)
+            try:
+                data = resp.json()
+            except ValueError:
+                data = {}
+            error = classify_http_error(resp.status_code, resp.headers, data)
+            _logger.info(
+                "DZ23 WhatsApp canal=%s HTTP %s código=%s permanente=%s",
+                self.id,
+                resp.status_code,
+                error.code,
+                error.permanent,
+            )
+            raise error
         try:
             return resp.json()
         except ValueError:
             return {"raw": resp.text}
 
-    def _send_evolution(self, to, body):
+    def _send_evolution(self, to, body, correlation_id=None):
         if not (self.evo_base and self.evo_instance and self.evo_apikey):
-            raise UserError(_("Canal Evolution incompleto (base/instância/apikey)."))
+            raise ProviderPermanentError(_("Canal Evolution incompleto (base/instância/apikey)."))
         url = "%s/message/sendText/%s" % (self.evo_base.rstrip("/"), self.evo_instance)
         data = self._post(
             url, headers={"apikey": self.evo_apikey}, json={"number": to, "text": body}
@@ -278,33 +437,37 @@ class DZ23Channel(models.Model):
         # Sucesso REAL exige id de mensagem no corpo — 2xx sem id é falha do
         # provedor e deve reprocessar (não marcar "sent" e perder a resposta).
         if not (data.get("key") or {}).get("id"):
-            raise UserError(_("Evolution não confirmou o envio (sem id de mensagem)."))
+            raise ProviderTransientError(_("Evolution não confirmou o envio (sem id de mensagem)."))
         return data
 
-    def _send_meta_cloud(self, to, body):
+    def _send_meta_cloud(self, to, body, correlation_id=None):
         if not (self.meta_token and self.meta_phone_id):
-            raise UserError(_("Canal Meta incompleto (token/phone_id)."))
+            raise ProviderPermanentError(_("Canal Meta incompleto (token/phone_id)."))
         url = "https://graph.facebook.com/%s/%s/messages" % (
             self.meta_api_version or "v20.0",
             self.meta_phone_id,
         )
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "text",
+            "text": {"body": body},
+        }
+        if correlation_id:
+            # Devolvido pela Meta nos callbacks de status (correlação).
+            payload["biz_opaque_callback_data"] = correlation_id
         data = self._post(
             url,
             headers={"Authorization": "Bearer %s" % self.meta_token},
-            json={
-                "messaging_product": "whatsapp",
-                "to": to,
-                "type": "text",
-                "text": {"body": body},
-            },
+            json=payload,
         )
         if not (data.get("messages") or [{}])[0].get("id"):
-            raise UserError(_("Meta não confirmou o envio (sem id de mensagem)."))
+            raise ProviderTransientError(_("Meta não confirmou o envio (sem id de mensagem)."))
         return data
 
-    def _send_twilio(self, to, body):
+    def _send_twilio(self, to, body, correlation_id=None):
         if not (self.twilio_sid and self.twilio_token and self.twilio_from):
-            raise UserError(_("Canal Twilio incompleto (sid/token/from)."))
+            raise ProviderPermanentError(_("Canal Twilio incompleto (sid/token/from)."))
         url = "https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json" % self.twilio_sid
         frm = (
             self.twilio_from
@@ -313,24 +476,227 @@ class DZ23Channel(models.Model):
         )
         data = self._post(
             url,
-            data={"From": frm, "To": "whatsapp:+%s" % to, "Body": body},
+            data={
+                "From": frm,
+                "To": "whatsapp:+%s" % to,
+                "Body": body,
+                # Status (sent/delivered/read/failed/undelivered) volta assinado
+                # para o webhook tokenizado deste canal.
+                "StatusCallback": self._public_webhook_url("twilio"),
+            },
             auth=(self.twilio_sid, self.twilio_token),
         )
         if not data.get("sid"):
-            raise UserError(_("Twilio não confirmou o envio (sem SID)."))
+            raise ProviderTransientError(_("Twilio não confirmou o envio (sem SID)."))
         return data
 
+    # ---------- janela de atendimento e templates (ADR-009) ----------
+    def _service_window_open(self, recipient):
+        """Meta/Twilio só aceitam texto livre até 24 h após a última mensagem do
+        cliente. Evolution (não oficial) não tem janela."""
+        self.ensure_one()
+        if self.provider not in ("meta_cloud", "twilio"):
+            return True
+        contact = (
+            self.env["dz23.channel.contact"]
+            .sudo()
+            .search(
+                [("channel_id", "=", self.id), ("provider_user_id", "=", _e164_br(recipient))],
+                limit=1,
+            )
+        )
+        last = contact.last_inbound_at
+        return bool(last and fields.Datetime.now() - last <= _SERVICE_WINDOW)
+
+    def send_template(self, number, template, params=None, correlation_id=None):
+        """Envia um template APROVADO (fora da janela de 24 h)."""
+        self.ensure_one()
+        to = _e164_br(number)
+        if not to:
+            raise ProviderPermanentError(_("Número de WhatsApp inválido."))
+        template = template.sudo()
+        if template.channel_id != self:
+            raise ProviderPermanentError(_("O template pertence a outro canal."))
+        params = [str(p) for p in (params or [])]
+        template._check_sendable(params)
+        channel = self.sudo()
+        if channel.provider == "meta_cloud":
+            return channel._send_template_meta(to, template, params, correlation_id)
+        if channel.provider == "twilio":
+            return channel._send_template_twilio(to, template, params)
+        return channel._send_evolution(to, template._render(params))
+
+    def _send_template_meta(self, to, template, params, correlation_id=None):
+        if not (self.meta_token and self.meta_phone_id):
+            raise ProviderPermanentError(_("Canal Meta incompleto (token/phone_id)."))
+        url = "https://graph.facebook.com/%s/%s/messages" % (
+            self.meta_api_version or "v20.0",
+            self.meta_phone_id,
+        )
+        body = {"name": template.name, "language": {"code": template.language_code}}
+        if params:
+            body["components"] = [
+                {"type": "body", "parameters": [{"type": "text", "text": p} for p in params]}
+            ]
+        payload = {"messaging_product": "whatsapp", "to": to, "type": "template", "template": body}
+        if correlation_id:
+            payload["biz_opaque_callback_data"] = correlation_id
+        data = self._post(
+            url, headers={"Authorization": "Bearer %s" % self.meta_token}, json=payload
+        )
+        if not (data.get("messages") or [{}])[0].get("id"):
+            raise ProviderTransientError(_("Meta não confirmou o envio (sem id de mensagem)."))
+        return data
+
+    def _send_template_twilio(self, to, template, params):
+        if not (self.twilio_sid and self.twilio_token and self.twilio_from):
+            raise ProviderPermanentError(_("Canal Twilio incompleto (sid/token/from)."))
+        if not template.provider_template_id:
+            raise ProviderPermanentError(_("Template Twilio sem ContentSid."))
+        frm = (
+            self.twilio_from
+            if self.twilio_from.startswith("whatsapp:")
+            else "whatsapp:%s" % self.twilio_from
+        )
+        data = self._post(
+            "https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json" % self.twilio_sid,
+            data={
+                "From": frm,
+                "To": "whatsapp:+%s" % to,
+                "ContentSid": template.provider_template_id,
+                "ContentVariables": json.dumps({str(i + 1): p for i, p in enumerate(params)}),
+                "StatusCallback": self._public_webhook_url("twilio"),
+            },
+            auth=(self.twilio_sid, self.twilio_token),
+        )
+        if not data.get("sid"):
+            raise ProviderTransientError(_("Twilio não confirmou o envio (sem SID)."))
+        return data
+
+    def action_sync_templates(self):
+        self.ensure_one()
+        count = self.env["dz23.message.template"]._sync_meta(self)
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Templates"),
+                "message": _("%s template(s) sincronizado(s).") % count,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    # ---------- mídia recebida (ADR-009) ----------
+    def _media_fetch(self, media, max_bytes):
+        """Baixa os bytes da mídia. Retorna (bytes, mime declarado, sha256 esperado)."""
+        self.ensure_one()
+        channel = self.sudo()
+        fetch = {
+            "meta_cloud": channel._media_fetch_meta,
+            "evolution": channel._media_fetch_evolution,
+            "twilio": channel._media_fetch_twilio,
+        }[channel.provider]
+        return fetch(media, max_bytes)
+
+    def _download(self, url, max_bytes, **kwargs):
+        """GET em streaming com teto de tamanho, só para hosts permitidos (anti-SSRF)."""
+        if not is_allowed_download_url(url):
+            raise MediaRejectedError("URL de mídia fora da lista de hosts permitidos")
+        try:
+            resp = requests.get(url, timeout=_TIMEOUT, stream=True, **kwargs)
+        except requests.exceptions.RequestException as e:
+            raise ProviderTransientError(
+                _("Falha de rede ao baixar mídia (%s).") % type(e).__name__
+            ) from None
+        try:
+            if resp.status_code >= 400:
+                raise classify_http_error(resp.status_code, resp.headers, {})
+            if int(resp.headers.get("Content-Length") or 0) > max_bytes:
+                raise MediaRejectedError("arquivo maior que o limite")
+            chunks, total = [], 0
+            for chunk in resp.iter_content(chunk_size=65536):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise MediaRejectedError("arquivo maior que o limite")
+                chunks.append(chunk)
+            return b"".join(chunks), resp.headers.get("Content-Type", "")
+        finally:
+            resp.close()
+
+    def _media_fetch_meta(self, media, max_bytes):
+        if not (self.meta_token and media.media_id):
+            raise ProviderPermanentError(_("Mídia Meta sem token/media_id."))
+        if not _MEDIA_ID_RE.match(media.media_id):
+            raise MediaRejectedError("media_id inválido")
+        headers = {"Authorization": "Bearer %s" % self.meta_token}
+        info_url = "https://graph.facebook.com/%s/%s" % (
+            self.meta_api_version or "v20.0",
+            media.media_id,
+        )
+        try:
+            resp = requests.get(info_url, headers=headers, timeout=_TIMEOUT)
+        except requests.exceptions.RequestException as e:
+            raise ProviderTransientError(
+                _("Falha de rede ao consultar mídia (%s).") % type(e).__name__
+            ) from None
+        try:
+            info = resp.json()
+        except ValueError:
+            info = {}
+        if resp.status_code >= 400:
+            raise classify_http_error(resp.status_code, resp.headers, info)
+        if int(info.get("file_size") or 0) > max_bytes:
+            raise MediaRejectedError("arquivo maior que o limite")
+        data, content_type = self._download(info.get("url"), max_bytes, headers=headers)
+        return data, info.get("mime_type") or content_type, info.get("sha256")
+
+    def _media_fetch_evolution(self, media, max_bytes):
+        if not (self.evo_base and self.evo_instance and self.evo_apikey):
+            raise ProviderPermanentError(_("Canal Evolution incompleto (base/instância/apikey)."))
+        url = "%s/chat/getBase64FromMediaMessage/%s" % (
+            self.evo_base.rstrip("/"),
+            self.evo_instance,
+        )
+        data = self._post(
+            url,
+            headers={"apikey": self.evo_apikey},
+            json={"message": {"key": {"id": media.provider_message_id}}, "convertToMp4": False},
+        )
+        encoded = str(data.get("base64") or "")
+        if not encoded:
+            raise ProviderTransientError(_("Evolution não devolveu o arquivo."))
+        if len(encoded) > (max_bytes * 4) // 3 + 16:
+            raise MediaRejectedError("arquivo maior que o limite")
+        try:
+            raw = base64.b64decode(encoded.split(",")[-1], validate=True)
+        except (binascii.Error, ValueError):
+            raise MediaRejectedError("arquivo em base64 inválido") from None
+        return raw, data.get("mimetype"), None
+
+    def _media_fetch_twilio(self, media, max_bytes):
+        if not (self.twilio_sid and self.twilio_token and media.media_id):
+            raise ProviderPermanentError(_("Mídia Twilio sem credenciais/URL."))
+        data, content_type = self._download(
+            media.media_id, max_bytes, auth=(self.twilio_sid, self.twilio_token)
+        )
+        return data, content_type, None
+
+    def _on_media_downloaded(self, media):
+        """Gancho pós-download (o dz23_agent anexa o arquivo ao lead)."""
+        return False
+
     # ---------- inbound (base: só registra; dz23_agent sobrescreve) ----------
-    def handle_inbound(self, number, text, raw=None):
+    def handle_inbound(self, number, text, raw=None, message=None):
         """Processa uma mensagem recebida NO ESCOPO da empresa do canal.
-        Base apenas registra; o módulo dz23_agent sobrescreve para atender."""
+        `message`: metadados normalizados (message_type, caption, reply_to, media).
+        Base apenas registra (sem PII no log); o dz23_agent sobrescreve."""
         self.ensure_one()
         _logger.info(
-            "[canal %s/%s] inbound de %s: %s",
+            "[canal %s] inbound tipo=%s de ...%s",
             self.id,
-            self.company_id.display_name,
-            number,
-            (text or "")[:80],
+            (message or {}).get("message_type") or "text",
+            _digits(number)[-4:],
         )
         return False
 
@@ -364,7 +730,32 @@ class DZ23Channel(models.Model):
             or ICP.get_param("web.base.url")
             or "http://localhost:8069"
         ).rstrip("/")
-        return "%s/dz23/whatsapp/%s/webhook/%s" % (base, kind, self.webhook_token)
+        return "%s/dz23/whatsapp/%s/webhook/%s" % (base, kind, self.sudo().webhook_token)
+
+    def _public_webhook_url(self, kind):
+        # URL PÚBLICA (internet) usada por Meta/Twilio e na assinatura Twilio.
+        # Configurável em dz23.whatsapp.public_base_url (atrás de proxy/HTTPS).
+        ICP = self.env["ir.config_parameter"].sudo()
+        base = (
+            ICP.get_param("dz23.whatsapp.public_base_url")
+            or ICP.get_param("web.base.url")
+            or "http://localhost:8069"
+        ).rstrip("/")
+        return "%s/dz23/whatsapp/%s/webhook/%s" % (base, kind, self.sudo().webhook_token)
+
+    def _evolution_webhook_config(self):
+        return {
+            "webhook": {
+                "enabled": True,
+                "url": self._webhook_url("evolution"),
+                "webhookByEvents": False,
+                "events": ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"],
+                "headers": {
+                    "X-DZ23-Callback": self.callback_secret,
+                    "Content-Type": "application/json",
+                },
+            }
+        }
 
     def action_evolution_connect(self):
         """Botão do canal: abre o assistente de QR JÁ VINCULADO A ESTE canal
@@ -399,20 +790,7 @@ class DZ23Channel(models.Model):
         # webhook tokenizado + SEGREDO DE CALLBACK próprio no header (independente
         # da chave administrativa). O endpoint é fail-closed e valida esse header.
         self._evo_req(
-            "POST",
-            "/webhook/set/%s" % self.evo_instance,
-            json={
-                "webhook": {
-                    "enabled": True,
-                    "url": self._webhook_url("evolution"),
-                    "webhookByEvents": False,
-                    "events": ["MESSAGES_UPSERT"],
-                    "headers": {
-                        "X-DZ23-Callback": self.callback_secret,
-                        "Content-Type": "application/json",
-                    },
-                }
-            },
+            "POST", "/webhook/set/%s" % self.evo_instance, json=self._evolution_webhook_config()
         )
         data = self._evo_req("GET", "/instance/connect/%s" % self.evo_instance)
         qr = data.get("base64") or (data.get("qrcode") or {}).get("base64") or ""
@@ -426,17 +804,14 @@ class DZ23Channel(models.Model):
             self._evo_req(
                 "POST",
                 "/webhook/set/%s" % self.evo_instance,
-                json={
-                    "webhook": {
-                        "enabled": True,
-                        "url": self._webhook_url("evolution"),
-                        "webhookByEvents": False,
-                        "events": ["MESSAGES_UPSERT"],
-                        "headers": {
-                            "X-DZ23-Callback": self.callback_secret,
-                            "Content-Type": "application/json",
-                        },
-                    }
-                },
+                json=self._evolution_webhook_config(),
             )
-        return True
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Segredo de callback rotacionado"),
+                "message": _("O webhook da instância Evolution foi atualizado com o novo segredo."),
+                "type": "success",
+            },
+        }

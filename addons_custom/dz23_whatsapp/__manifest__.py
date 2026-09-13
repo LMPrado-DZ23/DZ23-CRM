@@ -1,9 +1,9 @@
 # DZ23 CRM — WhatsApp plugável (adaptador por provedor).
 # Provedores: Meta WhatsApp Cloud API, Twilio, Evolution API.
-# Credenciais ficam em ir.config_parameter (servidor), NUNCA no código.
+# Credenciais ficam no dz23.channel (restritas a admin), NUNCA no código.
 {
     "name": "DZ23 CRM — WhatsApp",
-    "version": "19.0.7.0.0",
+    "version": "19.0.15.0.0",
     "summary": "WhatsApp multi-tenant por canal (Meta Cloud API / Twilio / Evolution).",
     "author": "DZ23 (LEANDRO MARCOS PRADO LTDA)",
     "website": "https://www.dz23.com.br",
@@ -11,13 +11,26 @@
     "category": "Marketing",
     "depends": ["mail", "phone_validation", "sales_team"],
     "data": [
+        "security/dz23_groups.xml",
         "security/ir.model.access.csv",
         "security/dz23_channel_rules.xml",
+        "security/dz23_metrics_rules.xml",
+        "security/dz23_privacy_rules.xml",
         "data/config_params.xml",
         "data/inbox_cron.xml",
         "data/outbox_cron.xml",
+        "data/event_cron.xml",
+        "data/media_cron.xml",
+        "data/conversation_cron.xml",
+        "data/metrics_cron.xml",
+        "data/privacy_cron.xml",
         "views/dz23_channel_views.xml",
         "views/message_queue_views.xml",
+        "views/business_action_views.xml",
+        "views/media_template_views.xml",
+        "views/conversation_views.xml",
+        "views/health_metrics_views.xml",
+        "views/privacy_views.xml",
         "views/res_config_settings_views.xml",
         "wizard/whatsapp_compose_views.xml",
         "wizard/evolution_connect_views.xml",
