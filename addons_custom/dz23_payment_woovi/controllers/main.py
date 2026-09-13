@@ -1,9 +1,12 @@
-# Webhook Woovi: confirma o pagamento PIX.
-# SEGURANÇA (fail-closed): só processa se a assinatura RSA do corpo for válida
-# contra a chave pública da Woovi (ir.config_parameter dz23.woovi.webhook_pubkey).
-# Sem chave configurada OU assinatura inválida => 401 e NÃO confirma pagamento.
+# Webhook Woovi (PIX).
+# SEGURANÇA (fail-closed): só processa se a assinatura RSA do corpo bruto for válida
+# contra a chave pública da Woovi (ir.config_parameter dz23.woovi.webhook_pubkey —
+# chave pública da própria Woovi, igual para todas as contas). Sem chave ou
+# assinatura inválida => 401. Corpo > 1 MiB => 413. JSON inválido => 400.
+# O evento é PERSISTIDO (deduplicado) antes do 200; falha de persistência => 500.
 import base64
 import binascii
+import json
 import logging
 
 from odoo import http
@@ -12,7 +15,7 @@ from odoo.http import request
 _logger = logging.getLogger(__name__)
 
 _PUBKEY_PARAM = "dz23.woovi.webhook_pubkey"
-_MAX_BODY = 1024 * 1024  # 1 MiB: teto do corpo (evita DoS por payload grande)
+_MAX_BODY = 1024 * 1024  # 1 MiB
 
 
 def _verify_woovi_signature(raw_body, signature_b64, pubkey_pem):
@@ -38,7 +41,6 @@ def _verify_woovi_signature(raw_body, signature_b64, pubkey_pem):
 class WooviController(http.Controller):
     @http.route("/payment/woovi/webhook", type="http", auth="public", methods=["POST"], csrf=False)
     def woovi_webhook(self, **_kwargs):
-        # Teto de corpo ANTES de qualquer processamento (endpoint público).
         if (request.httprequest.content_length or 0) > _MAX_BODY:
             return request.make_response("payload too large", status=413)
         raw = request.httprequest.get_data() or b""
@@ -46,20 +48,25 @@ class WooviController(http.Controller):
             return request.make_response("payload too large", status=413)
         signature = request.httprequest.headers.get("x-webhook-signature", "")
         pubkey = request.env["ir.config_parameter"].sudo().get_param(_PUBKEY_PARAM, "")
-
-        # FAIL-CLOSED: sem chave pública configurada ou assinatura inválida, recusa.
         if not _verify_woovi_signature(raw, signature, pubkey):
             _logger.warning("Woovi webhook REJEITADO (assinatura ausente/inválida).")
             return request.make_response("unauthorized", status=401)
-
-        data = request.get_json_data()
-        charge = (data or {}).get("charge") or {}
-        correlation = charge.get("correlationID")
+        try:
+            data = json.loads(raw or b"{}")
+        except ValueError:
+            return request.make_response("bad request", status=400)
+        if not isinstance(data, dict):
+            return request.make_response("bad request", status=400)
+        try:
+            event, created = (
+                request.env["dz23.woovi.event"]
+                .sudo()
+                ._ingest_payload(data, source="webhook", raw=raw)
+            )
+        except Exception as error:  # noqa: BLE001 - 500 controlado para a Woovi reenviar
+            _logger.error("Woovi webhook: falha ao persistir evento (%s).", type(error).__name__)
+            return request.make_response("retry later", status=500)
         _logger.info(
-            "Woovi webhook OK: correlationID=%s status=%s", correlation, charge.get("status")
+            "Woovi webhook OK: evento=%s novo=%s estado=%s", event.id, created, event.state
         )
-        if correlation:
-            tx_sudo = request.env["payment.transaction"].sudo()._search_by_reference("woovi", data)
-            if tx_sudo:
-                tx_sudo._process("woovi", data)
         return request.make_response("ok")

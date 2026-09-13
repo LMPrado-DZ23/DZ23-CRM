@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Campo AppID no formulário do provedor (visível/obrigatório quando Woovi) -->
+    <!-- AppID (só admin) e atalho para os eventos no formulário do provedor Woovi. -->
     <record id="payment_provider_form_woovi" model="ir.ui.view">
         <field name="name">payment.provider.form.woovi</field>
         <field name="model">payment.provider</field>
@@ -11,6 +11,9 @@
                     <field name="woovi_app_id"
                            required="code == 'woovi' and state != 'disabled'"
                            password="True"/>
+                    <button name="%(dz23_payment_woovi.dz23_woovi_event_action)d" type="action"
+                            string="Ver eventos Woovi" class="btn-link" icon="fa-list"
+                            groups="base.group_system"/>
                 </group>
             </group>
         </field>

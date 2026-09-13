@@ -5,6 +5,24 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 5 — PIX Woovi robusto (`dz23_payment_woovi` 19.0.2.0.0)
+- **Cobrança idempotente**: criada uma única vez por transação (lock de linha + id
+  persistido) e **reutilizada ao recarregar a página**; `correlationID` = referência;
+  só **BRL** e valor > 0; resposta divergente da Woovi vira erro; expiração registrada;
+  cobrança vencida não é recriada (orienta novo pagamento).
+- **Eventos persistidos antes de processar** (`dz23.woovi.event`): dedupe pelo hash
+  do corpo, processamento imediato em savepoint e retry por cron; estados
+  `pending/done/ignored/rejected/failed` auditáveis.
+- **Confirmação exige valor recebido** (`pix.value`/`charge.value`); valor ou moeda
+  divergente => transação em erro; evento sem valor não confirma.
+- **Monotonia**: `active/pending < expired/cancelled < completed < refunded`; evento
+  atrasado (EXPIRED depois de COMPLETED) é ignorado; estorno registrado.
+- **Conciliação periódica** (10 min): consulta cobranças em aberto e aplica o status
+  real (eventos perdidos).
+- Webhook responde 500 se não conseguir persistir (a Woovi reenvia).
+- Testes: +20 (render repetido, moeda, valor, duplicado, fora de ordem, expiração,
+  estorno, conciliação, retry e webhook HTTP com assinatura RSA real de teste).
+
 ### Fase 4 — Outbox robusta e filas lógicas (`dz23_whatsapp` 19.0.11.0.0, `dz23_agent` 19.0.3.0.0)
 - **Erros de provedor tipados** (ADR-008): transitório (rede, 408/425/429/5xx e códigos
   de rate limit Meta/Twilio) volta para retry com piso de `Retry-After`; permanente

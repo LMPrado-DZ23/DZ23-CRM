@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="cron_dz23_woovi_process_events" model="ir.cron">
+        <field name="name">DZ23: processar eventos Woovi pendentes</field>
+        <field name="model_id" ref="model_dz23_woovi_event"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_process_pending()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">minutes</field>
+        <field name="active" eval="True"/>
+    </record>
+
+    <!-- Conciliação: consulta cobranças em aberto (eventos perdidos/fora de ordem). -->
+    <record id="cron_dz23_woovi_reconcile" model="ir.cron">
+        <field name="name">DZ23: conciliar cobranças PIX Woovi</field>
+        <field name="model_id" ref="payment.model_payment_transaction"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_woovi_reconcile()</field>
+        <field name="interval_number">10</field>
+        <field name="interval_type">minutes</field>
+        <field name="active" eval="True"/>
+    </record>
+</odoo>
