@@ -21,6 +21,10 @@
                         <group>
                             <field name="agent_autoreply"/>
                             <field name="webhook_token" readonly="1"/>
+                            <field name="public_webhook_url" readonly="1" widget="CopyClipboardChar"/>
+                            <field name="connection_state"/>
+                            <field name="connection_state_at"/>
+                            <field name="last_webhook_at"/>
                         </group>
                     </group>
                     <notebook>

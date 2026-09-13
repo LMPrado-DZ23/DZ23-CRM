@@ -74,6 +74,10 @@ jobs:
 
   odoo-tests:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Dentro do container o shell padrão é sh (dash), sem "set -o pipefail".
+        shell: bash
     services:
       db:
         image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94

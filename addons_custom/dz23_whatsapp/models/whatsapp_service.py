@@ -8,6 +8,8 @@ from odoo import api, models
 from odoo.exceptions import UserError
 from odoo.tools.translate import _
 
+from . import provider_normalizers
+
 _logger = logging.getLogger(__name__)
 
 
@@ -26,17 +28,18 @@ class DZ23WhatsApp(models.AbstractModel):
         return self.env["dz23.channel"].search([("company_id", "=", self.env.company.id)], limit=1)
 
     # ---------- Entrada (inbound) ----------
+    @staticmethod
+    def _first_inbound_text(events):
+        for event in events:
+            if event["kind"] == "message" and event["direction"] == "inbound" and event["text"]:
+                return event["sender"], event["text"]
+        return None, None
+
     @api.model
     def _parse_meta_inbound(self, data):
-        """Extrai (número, texto) de um payload de webhook da Meta Cloud API."""
-        try:
-            value = data["entry"][0]["changes"][0]["value"]
-            msg = (value.get("messages") or [{}])[0]
-            number = msg.get("from")
-            text = (msg.get("text") or {}).get("body")
-            return number, text
-        except Exception:  # noqa: BLE001
-            return None, None
+        """Compat: (número, texto) da 1ª mensagem de texto recebida (Meta).
+        O webhook usa a normalização completa (provider_normalizers)."""
+        return self._first_inbound_text(provider_normalizers.normalize_meta(data))
 
     def _on_inbound(self, number, text, raw=None):
         """Gancho legado. O processamento real é via dz23.channel.handle_inbound
@@ -88,16 +91,6 @@ class DZ23WhatsApp(models.AbstractModel):
     # ---------- Evolution: leitura de mensagem recebida ----------
     @api.model
     def _parse_evolution_inbound(self, data):
-        """Extrai (número, texto) de um evento MESSAGES_UPSERT da Evolution."""
-        try:
-            d = data.get("data") or {}
-            key = d.get("key") or {}
-            if key.get("fromMe"):
-                return None, None  # ignora o que nós mesmos enviamos
-            jid = key.get("remoteJid") or ""
-            number = jid.split("@")[0]
-            msg = d.get("message") or {}
-            text = msg.get("conversation") or (msg.get("extendedTextMessage") or {}).get("text")
-            return number, text
-        except Exception:  # noqa: BLE001
-            return None, None
+        """Compat: (número, texto) da 1ª mensagem recebida (Evolution); ignora
+        fromMe, grupos e broadcast via normalização."""
+        return self._first_inbound_text(provider_normalizers.normalize_evolution(data))

@@ -268,11 +268,14 @@ class DZ23ChannelAgent(models.Model):
         return self.company_id.currency_id.symbol or "R$"
 
     # ---- pipeline principal (determinístico; LLM só conversa) -------------
-    def handle_inbound(self, number, text, raw=None):
+    def handle_inbound(self, number, text, raw=None, message=None):
         self.ensure_one()
         if not self.agent_autoreply:
-            return super().handle_inbound(number, text, raw)
+            return super().handle_inbound(number, text, raw, message=message)
+        mtype = (message or {}).get("message_type") or "text"
         lead = self._agent_find_lead(number)
+        if mtype not in ("text", "interactive"):
+            return self._handle_non_text(lead, number, message or {})
         lead.message_post(body=_("📩 WhatsApp recebido de %s: %s") % (number, text))
         txt = text or ""
 
@@ -300,6 +303,35 @@ class DZ23ChannelAgent(models.Model):
         if reply:
             self.env["dz23.message.outbox"].sudo()._enqueue(self, number, reply)
             lead.message_post(body=_("🤖 Resposta enfileirada para envio: %s") % reply)
+        return True
+
+    def _handle_non_text(self, lead, number, message):
+        """Mídia/localização/contato: registra no lead (nunca descarta em silêncio)
+        e confirma o recebimento. Não envia nada à IA (imagem pode conter documento)."""
+        labels = {
+            "image": _("imagem"),
+            "audio": _("áudio"),
+            "video": _("vídeo"),
+            "document": _("documento"),
+            "location": _("localização"),
+            "contact": _("contato"),
+            "sticker": _("figurinha"),
+        }
+        mtype = message.get("message_type")
+        label = labels.get(mtype, _("mensagem"))
+        caption = message.get("caption")
+        lead.message_post(
+            body=_("📎 WhatsApp recebido de %(number)s: %(kind)s%(caption)s")
+            % {
+                "number": number,
+                "kind": label,
+                "caption": (" — %s" % caption) if caption else "",
+            }
+        )
+        if mtype == "sticker":
+            return True
+        reply = _("Recebi aqui (%s) 😊 Já vou verificar e te respondo por aqui.") % label
+        self.env["dz23.message.outbox"].sudo()._enqueue(self, number, reply)
         return True
 
     def _handle_schedule(self, lead, txt):

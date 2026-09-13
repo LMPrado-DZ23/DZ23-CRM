@@ -5,6 +5,25 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 2 — Normalização de provedores e webhooks completos (`dz23_whatsapp` 19.0.9.0.0)
+- **Normalizadores puros** (`provider_normalizers.py`, ADR-007) com contrato
+  interno validado: Meta (todas as entries/changes/messages + `statuses` com erro),
+  Evolution (`MESSAGES_UPSERT`, `MESSAGES_UPDATE`, `CONNECTION_UPDATE`, wrappers
+  efêmeros/view-once) e Twilio (mensagem + status callback).
+- **Twilio completo**: webhook tokenizado com `X-Twilio-Signature` (HMAC-SHA1 da URL
+  pública + parâmetros), `StatusCallback` no envio, validação de `AccountSid` e número.
+- **Validação de canal** (409): `phone_number_id` (Meta), instância (Evolution),
+  conta/número (Twilio).
+- Grupos, `status@broadcast` e newsletters não viram atendimento; mensagens
+  `fromMe` vão para eventos (nunca para o inbox); mídia/localização/contato são
+  registrados (`message_type`, `caption`, `reply_to`, `media_ref`) e o agente
+  confirma o recebimento em vez de ignorar.
+- Canal: `connection_state`, `last_webhook_at`, URL pública do webhook para copiar;
+  Evolution passa a assinar `MESSAGES_UPDATE` e `CONNECTION_UPDATE`.
+- Meta: `biz_opaque_callback_data` = `correlation_id` da outbox.
+- Log de inbound sem PII (só últimos 4 dígitos e tipo).
+- Testes: contrato dos normalizadores + webhooks HTTP ponta a ponta das três APIs.
+
 ### Fase 1 — Ciclo de vida de mensagem e filas com claim/lease (`dz23_whatsapp` 19.0.8.0.0)
 - **Novo** `dz23.message.event` (append-only, dedupe por canal+id+direção+status,
   índices por empresa/status, canal/id, outbox/data e pendentes) — ADR-006.

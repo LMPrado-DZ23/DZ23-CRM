@@ -44,6 +44,29 @@ class DZ23MessageInbox(models.Model):
     message_id = fields.Char(required=True, index=True)
     sender = fields.Char(help="provider_user_id / número E.164")
     text = fields.Text()
+    message_type = fields.Selection(
+        [
+            ("text", "Texto"),
+            ("image", "Imagem"),
+            ("audio", "Áudio"),
+            ("video", "Vídeo"),
+            ("document", "Documento"),
+            ("location", "Localização"),
+            ("contact", "Contato"),
+            ("interactive", "Botão/lista"),
+            ("reaction", "Reação"),
+            ("sticker", "Figurinha"),
+            ("unsupported", "Não suportado"),
+        ],
+        default="text",
+        required=True,
+        index=True,
+    )
+    caption = fields.Text()
+    reply_to = fields.Char(help="Id do provedor da mensagem respondida.")
+    media_ref = fields.Text(
+        readonly=True, help="Metadados normalizados de mídia/localização/contato (JSON)."
+    )
     payload = fields.Text(help="Envelope JSON completo (validado, sem truncamento).")
     payload_hash = fields.Char(index=True, readonly=True, help="SHA-256 do payload.")
     payload_preview = fields.Text(readonly=True)
@@ -77,7 +100,27 @@ class DZ23MessageInbox(models.Model):
 
     # ---------- enfileirar (chamado pelo webhook) ----------
     @api.model
-    def _enqueue(self, channel, message_id, sender, text, payload_dict):
+    def _enqueue_event(self, channel, event):
+        """Enfileira uma mensagem recebida já normalizada (ADR-007)."""
+        extra = {
+            "message_type": event.get("message_type") or "text",
+            "caption": event.get("caption") or False,
+            "reply_to": event.get("reply_to") or False,
+        }
+        ref = {k: event.get(k) for k in ("media", "location", "contacts") if event.get(k)}
+        if ref:
+            extra["media_ref"] = payload_json(ref)
+        return self._enqueue(
+            channel,
+            str(event["provider_message_id"]),
+            event.get("sender"),
+            event.get("text") or False,
+            event.get("payload"),
+            extra=extra,
+        )
+
+    @api.model
+    def _enqueue(self, channel, message_id, sender, text, payload_dict, extra=None):
         """Persiste com dedupe. Retorna (record, created?).
 
         Só a violação de unicidade (duplicata concorrente) é tratada; qualquer
@@ -106,6 +149,7 @@ class DZ23MessageInbox(models.Model):
                         "payload_preview": payload_preview(body),
                         "status": "pending",
                         "next_attempt_at": fields.Datetime.now(),
+                        **(extra or {}),
                     }
                 )
             return rec, True
@@ -183,6 +227,23 @@ class DZ23MessageInbox(models.Model):
             }
         )
 
+    def _message_meta(self):
+        """Metadados normalizados entregues ao atendimento (sem formato de provedor)."""
+        self.ensure_one()
+        try:
+            ref = json.loads(self.media_ref) if self.media_ref else {}
+        except ValueError:
+            ref = {}
+        return {
+            "message_type": self.message_type or "text",
+            "caption": self.caption or None,
+            "reply_to": self.reply_to or None,
+            "media": ref.get("media"),
+            "location": ref.get("location"),
+            "contacts": ref.get("contacts"),
+            "correlation_id": self.correlation_id,
+        }
+
     def _payload_dict(self):
         try:
             return json.loads(self.payload or "{}")
@@ -201,7 +262,7 @@ class DZ23MessageInbox(models.Model):
         try:
             with self.env.cr.savepoint():
                 self.channel_id._processing_self().handle_inbound(
-                    self.sender, self.text, self._payload_dict()
+                    self.sender, self.text, self._payload_dict(), message=self._message_meta()
                 )
                 self.write(
                     {
