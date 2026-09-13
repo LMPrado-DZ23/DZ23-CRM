@@ -5,6 +5,7 @@ from . import (
     test_inbox,
     test_media,
     test_message_lifecycle,
+    test_migrations,
     test_outbox,
     test_privacy,
     test_provider_errors,
@@ -12,6 +13,8 @@ from . import (
     test_queue_claim,
     test_templates_window,
     test_tenancy,
+    test_tenancy_queues,
     test_webhook_auth,
+    test_webhook_limits,
     test_webhook_providers,
 )

@@ -153,7 +153,10 @@ class DZ23WhatsAppWebhook(http.Controller):
         if refs and refs != {str(channel.meta_phone_id or "")}:
             _logger.warning("Meta webhook de outro phone_number_id canal=%s", channel.id)
             return request.make_response("conflict", status=409)
-        if not _ingest(channel, pn.normalize_meta(data)):
+        events = pn.normalize_meta(data)
+        if _too_many(events):
+            return request.make_response("payload too large", status=413)
+        if not _ingest(channel, events):
             return request.make_response("retry later", status=500)
         return request.make_response("ok")
 

@@ -5,6 +5,20 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 11 — Matriz de testes (249 testes)
+- **`docs/TEST_MATRIX.md`**: cada item obrigatório (webhooks, mensagens, agente, PIX,
+  multi-tenant, instalação) ligado aos testes que o comprovam.
+- Novos testes: limites de webhook (JSON inválido com assinatura válida, lote acima de
+  1000 eventos, corpo acima de 1 MiB), envio aceito sem id de mensagem, DLQ, pedido e
+  pagamento isolados por empresa, lead por empresa para o mesmo telefone, migração
+  `19.0.8.0.0` e carga de todos os scripts de migração.
+- **Corrigido (achado pelos testes)**: o webhook da Meta não tinha o teto de 1000
+  eventos por requisição que a Evolution já tinha (anti-DoS) — agora responde 413 sem
+  gravar nada.
+- **Upgrade automatizado**: `scripts/smoke.sh` e o CI atualizam (`-u`) os módulos
+  sobre o banco já instalado e reprovam em qualquer linha ERROR/CRITICAL; o smoke
+  local passou a aplicar o mesmo gate de log do CI.
+
 ### Fase 10 — LGPD e retenção (`dz23_whatsapp` 19.0.15.0.0, `dz23_agent` 19.0.7.0.0)
 - **Retenção por empresa** (ADR-013): mensagens finalizadas anonimizadas (texto,
   payload e telefone → pseudônimo HMAC por empresa) após 365 dias; prévia de status

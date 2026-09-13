@@ -41,6 +41,15 @@ class TestMessageOutbox(TransactionCase):
         self.assertEqual(rec.status, "sent")
         self.assertEqual(rec.provider_message_id, "X")
 
+    def test_provider_accept_without_message_id_is_not_sent(self):
+        # 2xx sem id de mensagem não prova o envio: fica em retry (nunca "sent").
+        rec = self.Outbox._enqueue(self.channel, "5561999990000", "oi")
+        with patch.object(type(self.channel), "_post", return_value={"status": "PENDING"}):
+            rec._process_one()
+        self.assertEqual(rec.status, "failed")
+        self.assertFalse(rec.provider_message_id)
+        self.assertEqual(rec.current_status, "queued")
+
     def test_process_failure_retries_then_dlq(self):
         rec = self.Outbox._enqueue(self.channel, "5561999990000", "oi")
         rec.max_attempts = 2

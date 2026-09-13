@@ -115,5 +115,20 @@ jobs:
           if grep -aE "(ERROR|CRITICAL) ci_dz23 " /tmp/odoo-tests.log; then
             echo "Erros no log do Odoo"; exit 1
           fi
+      - name: Atualização (-u) dos módulos sobre o banco já instalado
+        run: |
+          set -o pipefail
+          odoo \
+            --db_host db --db_user odoo --db_password odoo_ci \
+            -d ci_dz23 \
+            --addons-path="$GITHUB_WORKSPACE/addons_custom,/usr/lib/python3/dist-packages/odoo/addons" \
+            --data-dir=/tmp/odoo-data \
+            -u dz23_branding,dz23_crm,dz23_ai,dz23_whatsapp,dz23_agent,dz23_payment_woovi,dz23_fiscal,dz23_brasil_tools,dz23_integrations \
+            --workers=0 --max-cron-threads=0 \
+            --stop-after-init 2>&1 | tee /tmp/odoo-upgrade.log
+          grep -a "Modules loaded" /tmp/odoo-upgrade.log
+          if grep -aE "(ERROR|CRITICAL) ci_dz23 " /tmp/odoo-upgrade.log; then
+            echo "Erros na atualização dos módulos"; exit 1
+          fi
         # Nota: módulos OCA (helpdesk_mgmt, contract, sign_oca, fieldservice) não
         # estão no repo (baixados por scripts/fetch_oca.sh).
