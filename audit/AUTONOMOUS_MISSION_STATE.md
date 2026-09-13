@@ -1,74 +1,61 @@
-# AUTONOMOUS MISSION STATE — DZ23 CRM correção pós-reauditoria
+# AUTONOMOUS MISSION STATE — DZ23 CRM evolução (prompt mestre, 12 fases)
 
-- mission_id: dz23-post-reaudit-2026-09-05
-- objetivo: fechar HIGH/MEDIUM da reauditoria (DZ23_CRM_REAUDITORIA_P0_ED39FAB) em 6 ondas, cada uma testada e commitada.
-- branch: hardening/post-audit (a partir de df75128)
-- estado: EXECUTING (Docker de volta 2026-09-07; testes Ondas 4-6 = PASS 33/33; rumo a FINAL_AUDIT + push GitHub)
-- evidencia testes 2026-09-07: `0 failed, 0 error(s) of 33 tests` em dz23crm (dz23_agent 12, dz23_ai 7, dz23_whatsapp 24) com --workers=0 --http-port=8098
-- cache docker: build cache = 0B (179GB limpos no reinicio); vhdx grande em disco (compactar no fim)
-- critérios de aceite: gates locais verdes (testes dz23), isolamento cross-tenant provado sem sudo mascarar, idempotência (1 efeito por message_id), agente determinístico, privacidade IA, roles PG sem BYPASSRLS, /tmp/odoo.conf 0600, CI reprodutível; externos = BLOCKED_EXTERNAL.
+- mission_id: dz23-crm-evolution-2026-09-13
+- objetivo: executar as Fases 1–12 do "Prompt mestre — Evolução do DZ23 CRM"
+  (ver `docs/IMPLEMENTATION_PLAN.md`), testar ponta a ponta, deixar o CI do GitHub
+  100% verde e publicar em `github.com/LMPrado-DZ23/DZ23-CRM`.
+- autorização do usuário (2026-09-13): executar todas as fases e subir para o GitHub;
+  "não deixar nenhuma falha detectada no GitHub".
+- branch: `feat/crm-evolution` (a partir de `fd04837`)
+- estado: EXECUTING
+- histórico da missão anterior: ver `git log` (commits até `fd04837`).
 
-## Ondas
-- Onda 0 — segredos: **DONE** (commit 15aa28d). Rotação Evolution (old->401/new->200), callback_secret por canal (admin key->401), gitleaks allowlist removida, Evolution sem porta no host. Testes 12/12.
-- Onda 1 — P0-C gaps: provider_channel_id + unique(provider,provider_channel_id); identidade provider_user_id (dz23.channel.contact) unique(channel,provider_user_id); sair de sudo() p/ usuário técnico sujeito a record rules. **IN PROGRESS**
-- Onda 2 — inbox/outbox idempotente + worker + DLQ. PENDENTE
-- Onda 3 — agente determinístico + persona honesta "assistente virtual". PENDENTE
-- Onda 4 — privacidade IA + Gemini header + logger redaction. PENDENTE
-- Onda 5 — roles PG + /tmp/odoo.conf 0600 + Ollama rede privada + digests + upgrade fiscal. PENDENTE (ops delicadas -> checkpoint)
-- Onda 6 — IAP pago + Ruff (102) + CI locks/SBOM. PENDENTE
+## Critérios de aceite (prompt mestre §17 + usuário)
+1. Instala em banco limpo (smoke). 2. Upgrade do `dz23crm` com dados antigos funciona.
+3. Testes antigos + novos verdes. 4. Idempotência de efeitos provada por teste.
+5. Status monotônicos. 6. Reentrega de webhook não duplica. 7. Compra repetida não
+duplica orçamento. 8. Sem dupla reserva. 9. Re-render PIX não duplica cobrança.
+10. Meta/Twilio/Evolution validam canal. 11. Nenhum segredo em código/log/doc.
+12. Isolamento entre empresas. 13. IA externa só com dados autorizados/redigidos.
+14. Bot pausável/assumível por humano. 15. DLQ investigável e reprocessável.
+16. README honesto. 17. Lint/compile/testes registrados. 18. Nenhuma integração real
+em teste. 19. **Todos os jobs do CI verdes no GitHub** (lint, secrets, sast,
+deps-container, odoo-tests) + PRs do dependabot sem falha. 20. 3 auditores: 0 CRITICAL/0 HIGH.
 
-## Runtime atual
-- dz23net conecta odoo/evolution/ollama por nome; odoo 127.0.0.1:8069; evo interno; ollama 0.0.0.0:11434 (Onda 5).
-- Canal id=1 token=4jhPSUn4O-uKOdUbSitkV6716klzsTmH, evo_instance=dz23crm, callback_secret set, WhatsApp state=open.
-- Evolution admin key rotacionada (só no docker/.env). webhook_base=http://docker-odoo-1:8069. IA: dz23-ollama:11434, llama3.2:3b.
+## Baseline
+- Fase 0: commit `d170085` — smoke 41/41, ruff limpo.
+- CI GitHub em `main` (run 34231829185): lint ✅, secrets ✅, **sast ❌, odoo-tests ❌,
+  deps-container ❌**; 5 PRs dependabot ❌ (mesma causa).
 
-## matriz onda -> commit -> estado
-- Onda 0 segredos -> 15aa28d -> DONE (testado 12/12)
-- Onda 1 tenancy gaps -> 507474b -> DONE (testado 14/14)
-- Onda 2 inbox/worker/DLQ -> ac7f6e3 -> DONE (testado 18/18; webhook 209ms ao vivo)
-- Onda 3 agente determinístico -> a798a73 -> DONE (testado 28/28)
-- Onda 4 privacidade IA -> 35ed2d6 -> código + testes escritos; RUNTIME BLOCKED (Docker)
-- Onda 5 /tmp 0600 + roles PG + ollama privado -> 4c8edd6 -> arquivos escritos; APPLY BLOCKED (Docker+backup)
-- Onda 6 ruff 0 + OCA lock -> 629b70d -> ruff/compileall OK; IAP/digests/actions-SHA/SBOM BLOCKED (Docker/rede)
+## Fases
+| Fase | Estado | Commit | Evidência |
+|---|---|---|---|
+| 0 Baseline | DONE | d170085 | smoke 41/41 |
+| CI verde (sast/odoo-tests/trivy) | EXECUTING | — | — |
+| 1 Ciclo de vida + P0 inbox/outbox | PENDING | — | — |
+| 2 Normalização + webhooks Meta/Twilio/Evolution | PENDING | — | — |
+| 3 Idempotência de efeitos (compra/agenda) | PENDING | — | — |
+| 4 Outbox robusta + filas lógicas | PENDING | — | — |
+| 5 PIX Woovi | PENDING | — | — |
+| 6 Mídia e templates | PENDING | — | — |
+| 7 Caixa de atendimento humano | PENDING | — | — |
+| 8 Governança IA | PENDING | — | — |
+| 9 Observabilidade | PENDING | — | — |
+| 10 LGPD/retenção | PENDING | — | — |
+| 11 Testes (matriz) | PENDING | — | — |
+| 12 Documentação | PENDING | — | — |
+| Auditoria 3 agentes | PENDING | — | — |
+| Push + CI verde | PENDING | — | — |
 
-## blockers externos
-- Docker Desktop caiu (disco cheio; vhdx 227GB). C: livre subiu p/ ~19GB após limpar TEMP.
-  Motor não reinicia via wsl --shutdown; RECOMENDADO reiniciar o Windows (roda fsck + libera locks).
-- Após Docker voltar: (1) docker builder prune -af (apaga 179GB cache, autorizado);
-  (2) rodar suíte dz23 completa (Ondas 4-6); (3) aplicar roles PG (com backup);
-  (4) recriar ollama privado; (5) desativar IAP; (6) pin digests/actions + SBOM + CI.
+## Como testar
+- smoke: `bash scripts/smoke.sh` (DB descartável, 9 módulos, tag dz23).
+- upgrade dev: `docker exec docker-odoo-1 bash -c 'odoo -c /tmp/odoo.conf -d dz23crm -u <mods> --stop-after-init --workers=0 --http-port=8098'`
+- lint: `python -m ruff check . && python -m ruff format --check .`
+- CI: `wsl.exe -e bash -lc "gh run list -R LMPrado-DZ23/DZ23-CRM"` (gh autenticado só no WSL).
+- NÃO rodar `docker/verify.sh` (instala no dz23crm vivo).
 
-## progresso 2026-09-07 (Docker de volta)
-- testes Ondas 4-6: 33/33 PASS (evidência acima)
-- odoo reiniciado com código endurecido: HTTP 200 em /web/login
-- imagens pinadas por digest (odoo:19, postgres:16) — commit
-- IAP: DECISÃO ASSUMIDA — cron crm_iap_enrich.ir_cron_lead_enrichment (id 18)
-  DESATIVADO no dz23crm (reversível; evita gasto automático de créditos IAP)
-- Ollama: sem portas publicadas (MEDIUM-09 ok)
-- gitleaks: no leaks found (40 commits) — seguro p/ push
-- FINAL_AUDIT: 3 auditores (A arch, B sec, C qa) rodando
+## Blockers externos
+- (nenhum até agora)
 
-## pendências honestas
-- push GitHub: sem remote/gh -> precisa URL de repo PRIVADO do usuário (BLOCKED_EXTERNAL)
-- PG role split (HIGH-03): roles criadas via script; TROCA de ownership + usuário runtime
-  = maintenance window + backup + go do usuário (não auto-aplicar, §14)
-- vhdx grande em disco: compactar exige desligar Docker (fazer por último)
-
-## FINAL_AUDIT concluída (2026-09-07)
-- 3 auditores independentes: A(arq) 1 HIGH, B(sec) 0 HIGH, C(qa) 2 HIGH.
-- Todos os 3 HIGH corrigidos + MEDIUM/LOW -> commit fce1012.
-- Relatório: audit/FINAL_THREE_AGENT_REVIEW_2026-09-07.md
-- GATE: CRITICAL=0, HIGH=0; testes 33/33 (0 failed/0 error); ruff PASS;
-  gitleaks 0 vazamentos (42 commits); Odoo vivo HTTP 200 com código novo.
-- estado: CANDIDATE_COMPLETED (verificado). Único item externo p/ 100%: push GitHub (falta URL do repo).
-
-## open-source prep (2026-09-07)
-- licença MIT (LICENSE + 9 manifests); README com diferenciais vs Odoo original + 9 módulos
-- tudo consolidado em `main` (ff de hardening/post-audit); gitleaks limpo (44 commits)
-- gh CLI: instalado no WSL (/usr/bin/gh v2.45.0) mas NAO autenticado
-
-## PUBLICADO (2026-09-07) — MISSION_COMPLETED
-- Repositório PÚBLICO: https://github.com/lmpradodz23-design/DZ23-CRM (branch main)
-- Licença MIT (LICENSE puro + NOTICE); gh autenticado no WSL como lmpradodz23-design
-- Gate final comprovado: CRITICAL=0, HIGH=0; testes 33/33; ruff PASS; gitleaks 0; HTTP 200
-- estado: COMPLETED
+## Resume instructions
+Ler este arquivo → `git status` / `git log` na branch → seguir a primeira fase não DONE.

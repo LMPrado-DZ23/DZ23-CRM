@@ -9,7 +9,7 @@
 # provedores não recebem idempotency key hoje — LIMITAÇÃO CONHECIDA; mitigar com
 # clientMessageId derivado do outbox.id quando o provedor suportar dedupe.
 import logging
-import random
+import secrets
 from datetime import timedelta
 
 from odoo import api, fields, models
@@ -20,6 +20,8 @@ _logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 6
 _BATCH = 20
+# Jitter de retry com fonte do SO (evita padrão previsível e o B311 do bandit).
+_JITTER = secrets.SystemRandom()
 
 
 def _sanitize(msg):
@@ -130,7 +132,7 @@ class DZ23MessageOutbox(models.Model):
                 _logger.warning("Outbox %s -> DLQ após %s tentativas.", self.id, attempts)
             else:
                 backoff = min(3600, 2**attempts)
-                delay = backoff + random.randint(0, max(1, backoff // 2))
+                delay = backoff + _JITTER.randint(0, max(1, backoff // 2))
                 self.write(
                     {
                         "status": "failed",

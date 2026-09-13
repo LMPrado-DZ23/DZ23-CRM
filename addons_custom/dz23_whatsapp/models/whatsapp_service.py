@@ -53,10 +53,10 @@ class DZ23WhatsApp(models.AbstractModel):
             else:  # meta_cloud
                 value = data["entry"][0]["changes"][0]["value"]
                 mid = (value.get("messages") or [{}])[0].get("id")
-            if mid:
-                return str(mid)
-        except Exception:  # noqa: BLE001
-            pass
+        except (AttributeError, IndexError, KeyError, TypeError):
+            mid = None  # envelope fora do formato: cai no hash abaixo
+        if mid:
+            return str(mid)
         # fallback determinístico: hash do envelope (evita perder mensagem sem id)
         import hashlib
         import json as _json

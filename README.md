@@ -9,7 +9,7 @@ por **módulos próprios** (nunca editando o núcleo).
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Base: Odoo 19](https://img.shields.io/badge/Base-Odoo%2019%20Community-875A7B.svg)](https://github.com/odoo/odoo)
 [![PT-BR](https://img.shields.io/badge/Idioma-Portugu%C3%AAs%20(BR)-009c3b.svg)](#)
-[![CI](https://github.com/lmpradodz23-design/DZ23-CRM/actions/workflows/ci.yml/badge.svg)](https://github.com/lmpradodz23-design/DZ23-CRM/actions/workflows/ci.yml)
+[![CI](https://github.com/LMPrado-DZ23/DZ23-CRM/actions/workflows/ci.yml/badge.svg)](https://github.com/LMPrado-DZ23/DZ23-CRM/actions/workflows/ci.yml)
 [![Testes](https://img.shields.io/badge/Testes%20dz23-verdes-brightgreen.svg)](#qualidade--seguran%C3%A7a)
 
 </div>

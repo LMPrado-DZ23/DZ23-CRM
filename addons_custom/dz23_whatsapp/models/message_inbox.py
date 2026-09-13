@@ -4,7 +4,7 @@
 # DLQ. Garante EXATAMENTE UM efeito por message_id (idempotência).
 import json
 import logging
-import random
+import secrets
 from datetime import timedelta
 
 from odoo import api, fields, models
@@ -14,6 +14,8 @@ _logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 6
 _BATCH = 20
+# Jitter de retry com fonte do SO (evita padrão previsível e o B311 do bandit).
+_JITTER = secrets.SystemRandom()
 
 
 def _sanitize(msg):
@@ -130,7 +132,7 @@ class DZ23MessageInbox(models.Model):
                 _logger.warning("Inbox %s -> DLQ após %s tentativas.", self.id, attempts)
             else:
                 backoff = min(3600, 2**attempts)
-                delay = backoff + random.randint(0, max(1, backoff // 2))
+                delay = backoff + _JITTER.randint(0, max(1, backoff // 2))
                 self.write(
                     {
                         "status": "failed",
