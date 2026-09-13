@@ -1,4 +1,5 @@
 # Inbox durável: dedupe (idempotência), exatamente-um-efeito, retry/backoff e DLQ.
+from datetime import timedelta
 from unittest.mock import patch
 
 from odoo import fields
@@ -40,10 +41,12 @@ class TestMessageInbox(TransactionCase):
         self.assertEqual(self.Inbox.search_count([("message_id", "=", "MID1")]), 1)
 
     def test_exactly_one_effect_on_reprocess(self):
-        p = self._payload("MID2", "5561933334444", "quero agendar 20/09 as 14:00")
-        self.Inbox._enqueue(
-            self.channel, "MID2", "5561933334444", "quero agendar 20/09 as 14:00", p
-        )
+        # Data futura num dia útil (terça) dentro do expediente padrão.
+        day = fields.Date.today() + timedelta(days=400)
+        day += timedelta(days=(1 - day.weekday()) % 7)
+        text = "quero agendar %s as 14:00" % day.strftime("%d/%m/%Y")
+        p = self._payload("MID2", "5561933334444", text)
+        self.Inbox._enqueue(self.channel, "MID2", "5561933334444", text, p)
         self.Inbox._cron_process()
         rec = self.Inbox.search([("message_id", "=", "MID2")])
         self.assertEqual(rec.status, "done")

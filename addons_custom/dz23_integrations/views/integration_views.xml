@@ -31,6 +31,7 @@
                                             class="btn btn-primary btn-sm">Configurar</button>
                                     <a t-if="record.docs_url.raw_value"
                                        t-att-href="record.docs_url.raw_value" target="_blank"
+                                       rel="noopener noreferrer" role="button"
                                        class="btn btn-link btn-sm">Docs</a>
                                 </div>
                             </div>

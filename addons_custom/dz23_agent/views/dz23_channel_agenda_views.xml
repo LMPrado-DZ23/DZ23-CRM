@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Configuração de agenda por canal (ADR-004) e origem do pedido. -->
+    <record id="dz23_channel_view_form_agenda" model="ir.ui.view">
+        <field name="name">dz23.channel.form.agenda</field>
+        <field name="model">dz23.channel</field>
+        <field name="inherit_id" ref="dz23_whatsapp.dz23_channel_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Agenda" name="agenda">
+                    <group>
+                        <group>
+                            <field name="agenda_user_id"/>
+                            <field name="agenda_calendar_id"/>
+                        </group>
+                        <group>
+                            <field name="agenda_duration_minutes"/>
+                            <field name="agenda_buffer_minutes"/>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="sale_order_view_form_dz23_origin" model="ir.ui.view">
+        <field name="name">sale.order.form.dz23.origin</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='origin']" position="after">
+                <field name="dz23_channel_id" invisible="not dz23_channel_id"/>
+                <field name="dz23_source_correlation_id" invisible="not dz23_source_correlation_id"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

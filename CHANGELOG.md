@@ -5,6 +5,25 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 3 — Idempotência de efeitos de negócio (`dz23_whatsapp` 19.0.10.0.0, `dz23_agent` 19.0.2.0.0)
+- **Novo** `dz23.business.action` (ADR-005): efeito executa uma vez por
+  `idempotency_key`; retry/mensagem repetida/worker concorrente devolvem o mesmo
+  alvo; falha não registra (retry executa de novo). Tela "Ações de negócio".
+- **Compra em etapas**: produto → variação (pergunta quando ambígua) → quantidade →
+  resumo com **preço da lista de preços do Odoo** → confirmação explícita (SIM/NÃO,
+  expira em 30 min) → orçamento idempotente. Mesma intenção reutiliza o orçamento
+  aberto (ajusta quantidade). Pedido carrega canal e mensagem de origem. A IA não
+  decide preço nem cria pedido.
+- **Agenda sem dupla reserva** (ADR-004): `pg_advisory_xact_lock` por
+  empresa/responsável, conflito com toda a agenda do responsável (inclusive eventos
+  manuais), expediente e feriados via `resource.calendar`, fuso da empresa, duração
+  e intervalo configuráveis por canal, **cancelar** (arquiva) e **remarcar**.
+- Regex de agenda não captura mais "atendimento"/"marca".
+- Odoo 19: domínios com `odoo.fields.Domain` (sem `odoo.osv` depreciado).
+- Testes: +21 (idempotência com cursores concorrentes, compra repetida,
+  lista de preços, variações, expediente, feriado, fuso, intervalo, agenda manual,
+  cancelar/remarcar, reserva concorrente). Suíte `dz23`: 117/117.
+
 ### Fase 2 — Normalização de provedores e webhooks completos (`dz23_whatsapp` 19.0.9.0.0)
 - **Normalizadores puros** (`provider_normalizers.py`, ADR-007) com contrato
   interno validado: Meta (todas as entries/changes/messages + `statuses` com erro),
