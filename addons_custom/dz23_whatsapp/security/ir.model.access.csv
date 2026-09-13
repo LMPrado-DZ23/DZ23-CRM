@@ -5,9 +5,15 @@ access_dz23_channel_user,dz23.channel.user,model_dz23_channel,base.group_user,1,
 access_dz23_channel_manager,dz23.channel.manager,model_dz23_channel,base.group_system,1,1,1,1
 access_dz23_channel_contact_user,dz23.channel.contact.user,model_dz23_channel_contact,base.group_user,1,1,1,0
 access_dz23_channel_contact_manager,dz23.channel.contact.manager,model_dz23_channel_contact,base.group_system,1,1,1,1
-access_dz23_message_inbox_user,dz23.message.inbox.user,model_dz23_message_inbox,base.group_user,1,0,0,0
+access_dz23_message_inbox_user,dz23.message.inbox.attendant,model_dz23_message_inbox,group_dz23_attendant,1,0,0,0
 access_dz23_message_inbox_manager,dz23.message.inbox.manager,model_dz23_message_inbox,base.group_system,1,1,1,1
-access_dz23_message_outbox_user,dz23.message.outbox.user,model_dz23_message_outbox,base.group_user,1,0,0,0
+access_dz23_message_outbox_user,dz23.message.outbox.attendant,model_dz23_message_outbox,group_dz23_attendant,1,0,0,0
+access_dz23_conversation_attendant,dz23.conversation.attendant,model_dz23_conversation,group_dz23_attendant,1,1,1,0
+access_dz23_conversation_supervisor,dz23.conversation.supervisor,model_dz23_conversation,group_dz23_supervisor,1,1,1,1
+access_dz23_conversation_reply_attendant,dz23.conversation.reply.attendant,model_dz23_conversation_reply,group_dz23_attendant,1,1,1,1
+access_dz23_conversation_transfer_attendant,dz23.conversation.transfer.attendant,model_dz23_conversation_transfer,group_dz23_attendant,1,1,1,1
+access_dz23_message_media_attendant,dz23.message.media.attendant,model_dz23_message_media,group_dz23_attendant,1,0,0,0
+access_dz23_message_event_attendant,dz23.message.event.attendant,model_dz23_message_event,group_dz23_attendant,1,0,0,0
 access_dz23_message_outbox_manager,dz23.message.outbox.manager,model_dz23_message_outbox,base.group_system,1,1,1,1
 access_dz23_message_event_manager,dz23.message.event.manager,model_dz23_message_event,base.group_system,1,1,1,1
 access_dz23_message_media_manager,dz23.message.media.manager,model_dz23_message_media,base.group_system,1,1,1,1

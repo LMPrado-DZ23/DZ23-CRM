@@ -5,6 +5,26 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 7 — Caixa de atendimento humano (`dz23_whatsapp` 19.0.13.0.0, `dz23_agent` 19.0.4.0.0)
+- **Novo app "Atendimento"** (`dz23.conversation`, ADR-010): uma conversa por contato,
+  kanban por estado (`open/bot_active/human_active/waiting_customer/waiting_internal/
+  resolved/blocked`), responsável, equipe, prioridade e trilha de auditoria (chatter
+  com tracking).
+- **Ações**: assumir (pausa o robô), devolver ao robô, transferir (equipe/responsável
+  + nota interna), aguardar cliente/interno, resolver, bloquear/desbloquear.
+- **Notas internas** ficam no chatter e nunca vão ao cliente; **resposta do atendente
+  pela outbox** (retry, DLQ, status, janela de 24 h — fora dela só template).
+- **Histórico unificado** de recebidas/enviadas com status de entrega/leitura, pedidos
+  de venda do cliente e lead.
+- **SLA de 1ª resposta** por canal com cron que marca atraso; **busca** por telefone,
+  lead, pedido e texto das mensagens.
+- **Robô respeita o atendimento**: com humano no controle (ou bloqueado) só registra;
+  com o robô desligado a mensagem continua visível no lead (corrige R16); "SAIR"
+  aplica **opt-out** e bloqueia envios proativos; contato bloqueado não recebe nada.
+- **Grupos Atendente/Supervisor**; usuário interno comum deixa de ler mensagens de
+  WhatsApp (corrige R22).
+- Envio manual legado (`dz23.whatsapp.compose`) passa pela outbox (corrige R17).
+
 ### Fase 6 — Mídia e templates oficiais (`dz23_whatsapp` 19.0.12.0.0)
 - **Mídia recebida** (`dz23.message.media`, ADR-009): worker de download próprio por
   provedor (Meta em 2 etapas, Evolution base64, Twilio com basic auth), **MIME real

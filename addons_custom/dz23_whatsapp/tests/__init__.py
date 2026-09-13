@@ -1,5 +1,6 @@
 from . import (
     test_business_action,
+    test_conversation,
     test_inbox,
     test_media,
     test_message_lifecycle,

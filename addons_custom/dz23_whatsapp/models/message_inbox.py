@@ -40,6 +40,9 @@ class DZ23MessageInbox(models.Model):
     company_id = fields.Many2one(
         related="channel_id.company_id", store=True, index=True, readonly=True
     )
+    conversation_id = fields.Many2one(
+        "dz23.conversation", ondelete="set null", index=True, readonly=True
+    )
     provider = fields.Char(index=True)
     message_id = fields.Char(required=True, index=True)
     sender = fields.Char(help="provider_user_id / número E.164")
@@ -128,10 +131,17 @@ class DZ23MessageInbox(models.Model):
             extra=extra,
         )
         if created:
-            # Janela de 24 h (a hora da mensagem, não a do webhook) e download da mídia.
-            self.env["dz23.channel.contact"].sudo()._touch_inbound(
-                channel, event.get("sender"), event.get("occurred_at")
+            # Janela de 24 h (a hora da mensagem, não a do webhook), conversa de
+            # atendimento (ADR-010) e download da mídia.
+            contact = (
+                self.env["dz23.channel.contact"]
+                .sudo()
+                ._touch_inbound(channel, event.get("sender"), event.get("occurred_at"))
             )
+            if contact:
+                conversation = self.env["dz23.conversation"].sudo()._for_contact(contact)
+                rec.conversation_id = conversation.id
+                conversation._on_inbound()
             self.env["dz23.message.media"].sudo()._enqueue_from_event(rec, event)
         return rec, created
 

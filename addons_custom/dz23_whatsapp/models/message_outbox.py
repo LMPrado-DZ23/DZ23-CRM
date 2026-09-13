@@ -107,6 +107,9 @@ class DZ23MessageOutbox(models.Model):
     provider_error_code = fields.Char(readonly=True)
     provider_error_message = fields.Char(readonly=True)
     event_ids = fields.One2many("dz23.message.event", "outbox_id", readonly=True)
+    conversation_id = fields.Many2one(
+        "dz23.conversation", ondelete="set null", index=True, readonly=True
+    )
     template_id = fields.Many2one("dz23.message.template", ondelete="restrict", readonly=True)
     template_params = fields.Text(readonly=True, help="Variáveis do template (JSON).")
 
@@ -118,12 +121,16 @@ class DZ23MessageOutbox(models.Model):
             body = body or template._render(params)
         if not body or not recipient:
             return self.browse()
+        conversation = (
+            self.env["dz23.conversation"].sudo()._for_number(channel, recipient, create=False)
+        )
         vals = {
             "channel_id": channel.id,
             "recipient": recipient,
             "body": body,
             "status": "pending",
             "next_attempt_at": fields.Datetime.now(),
+            "conversation_id": conversation.id or False,
         }
         if template:
             vals.update(
@@ -245,6 +252,13 @@ class DZ23MessageOutbox(models.Model):
         try:
             with self.env.cr.savepoint():
                 channel = self.channel_id._processing_self()
+                conversation = self.conversation_id.sudo()
+                if conversation.state == "blocked":
+                    raise ProviderPermanentError(_("Contato bloqueado: envio cancelado."))
+                if conversation.opt_out and self.template_id:
+                    raise ProviderPermanentError(
+                        _("Contato pediu para não receber mensagens proativas (opt-out).")
+                    )
                 if self.template_id:
                     data = channel.send_template(
                         self.recipient,
@@ -277,6 +291,8 @@ class DZ23MessageOutbox(models.Model):
                 }
             )
             self._apply_status("sent", occurred_at=now)
+            if self.conversation_id:
+                self.conversation_id.sudo()._on_outbound_sent(now)
         except Exception as e:  # noqa: BLE001 - qualquer falha vira retry/DLQ
             self._register_failure(e, started)
 

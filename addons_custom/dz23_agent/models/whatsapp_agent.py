@@ -68,6 +68,11 @@ _YES_RE = re.compile(
     r"fechado|fechou|isso(?:\s+mesmo)?|ok|okay|beleza|bora|pode)\b"
 )
 _NO_RE = re.compile(r"^\s*(?:nao|n|cancela|cancelar|desisto|negativo|deixa\s+pra\s+la)\b")
+# Opt-out: a mensagem inteira precisa ser o pedido (evita "quero sair do plano").
+_OPT_OUT_RE = re.compile(
+    r"^\s*(?:sair|parar|stop|descadastrar|cancelar\s+inscricao|"
+    r"nao\s+quero\s+(?:mais\s+)?receber(?:\s+\w+)*)\s*[.!]*\s*$"
+)
 _NUMBER_WORDS = {"um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cinco": 5}
 
 
@@ -446,16 +451,28 @@ class DZ23ChannelAgent(models.Model):
     # ---- pipeline principal (determinístico; LLM só conversa) ----
     def handle_inbound(self, number, text, raw=None, message=None):
         self.ensure_one()
-        if not self.agent_autoreply:
-            return super().handle_inbound(number, text, raw, message=message)
         message = message or {}
         mtype = message.get("message_type") or "text"
         contact = self._agent_contact(number)
         lead = contact.lead_id
+        conversation = self.env["dz23.conversation"].sudo()._for_contact(contact)
+        if not self.agent_autoreply or not conversation.bot_can_reply():
+            # Robô desligado ou humano no controle (ADR-010): só registra no lead —
+            # sem resposta automática, sem pedido e sem IA.
+            shown = text or message.get("caption") or mtype
+            lead.message_post(body=_("📩 WhatsApp recebido de %s: %s") % (number, shown))
+            return True
         if mtype not in ("text", "interactive"):
             return self._handle_non_text(lead, number, message)
         lead.message_post(body=_("📩 WhatsApp recebido de %s: %s") % (number, text))
-        reply = self._agent_route(contact, lead, text or "", message.get("correlation_id"))
+        if _OPT_OUT_RE.match(_norm(text or "")):
+            conversation.opt_out = True
+            reply = _(
+                "Pronto! Você não vai mais receber mensagens promocionais. "
+                "Se precisar de algo, é só chamar 😊"
+            )
+        else:
+            reply = self._agent_route(contact, lead, text or "", message.get("correlation_id"))
         if reply:
             # Entrega DURÁVEL: a resposta vai para a outbox (retry + DLQ).
             self.env["dz23.message.outbox"].sudo()._enqueue(self, number, reply)

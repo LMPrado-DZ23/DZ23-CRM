@@ -167,6 +167,12 @@ class DZ23Channel(models.Model):
         help="Preenchido quando o provedor responde 429: a outbox não envia por este "
         "canal até esse horário (respeita Retry-After).",
     )
+    # Caixa de atendimento (ADR-010)
+    sla_first_response_minutes = fields.Integer(
+        "SLA de 1ª resposta (min)",
+        default=15,
+        help="Prazo para responder uma nova mensagem do cliente (0 = sem SLA).",
+    )
     public_webhook_url = fields.Char(
         "URL do webhook (provedor)",
         compute="_compute_public_webhook_url",

@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="dz23_conversation_view_kanban" model="ir.ui.view">
+        <field name="name">dz23.conversation.kanban</field>
+        <field name="model">dz23.conversation</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="state" quick_create="false" group_create="false">
+                <field name="sla_breached"/>
+                <templates>
+                    <t t-name="card">
+                        <div class="d-flex justify-content-between">
+                            <field name="name" class="fw-bold"/>
+                            <field name="priority" widget="priority"/>
+                        </div>
+                        <field name="phone" class="text-muted small"/>
+                        <div class="d-flex justify-content-between mt-1">
+                            <field name="last_customer_message_at" widget="remaining_days" invisible="not last_customer_message_at"/>
+                            <span t-if="record.sla_breached.raw_value" class="badge text-bg-danger">SLA</span>
+                            <field name="user_id" widget="many2one_avatar_user"/>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="dz23_conversation_view_list" model="ir.ui.view">
+        <field name="name">dz23.conversation.list</field>
+        <field name="model">dz23.conversation</field>
+        <field name="arch" type="xml">
+            <list create="false" decoration-danger="sla_breached" decoration-muted="state in ('resolved', 'blocked')">
+                <field name="priority" widget="priority"/>
+                <field name="name"/>
+                <field name="phone"/>
+                <field name="channel_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="state"/>
+                <field name="user_id" widget="many2one_avatar_user"/>
+                <field name="team_id"/>
+                <field name="last_customer_message_at"/>
+                <field name="first_response_due_at"/>
+                <field name="sla_breached"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="dz23_conversation_view_form" model="ir.ui.view">
+        <field name="name">dz23.conversation.form</field>
+        <field name="model">dz23.conversation</field>
+        <field name="arch" type="xml">
+            <form create="false">
+                <header>
+                    <button name="action_open_reply" type="object" string="Responder" class="btn-primary"
+                            icon="fa-reply" invisible="state == 'blocked'"/>
+                    <button name="action_take" type="object" string="Assumir"
+                            invisible="state in ('human_active', 'blocked')"/>
+                    <button name="action_release_to_bot" type="object" string="Devolver ao robô"
+                            invisible="state not in ('human_active', 'waiting_internal', 'open')"/>
+                    <button name="action_open_transfer" type="object" string="Transferir"
+                            invisible="state == 'blocked'"/>
+                    <button name="action_wait_customer" type="object" string="Aguardar cliente"
+                            invisible="state in ('waiting_customer', 'blocked', 'resolved')"/>
+                    <button name="action_resolve" type="object" string="Resolver"
+                            invisible="state in ('resolved', 'blocked')"/>
+                    <button name="action_block" type="object" string="Bloquear" class="btn-danger"
+                            invisible="state == 'blocked'"
+                            confirm="Bloquear este contato? O robô não responde e nenhum envio sai."/>
+                    <button name="action_unblock" type="object" string="Desbloquear"
+                            invisible="state != 'blocked'"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="open,bot_active,human_active,waiting_customer,resolved"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="phone"/>
+                            <field name="partner_id"/>
+                            <field name="channel_id"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                            <field name="opt_out"/>
+                            <field name="blocked_reason" invisible="state != 'blocked'"/>
+                        </group>
+                        <group>
+                            <field name="user_id" widget="many2one_avatar_user"/>
+                            <field name="team_id"/>
+                            <field name="priority" widget="priority"/>
+                            <field name="last_customer_message_at"/>
+                            <field name="last_agent_message_at"/>
+                            <field name="first_response_due_at"/>
+                            <field name="sla_breached"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Recebidas" name="received">
+                            <field name="inbox_ids" readonly="1">
+                                <list>
+                                    <field name="received_at"/>
+                                    <field name="message_type"/>
+                                    <field name="text"/>
+                                    <field name="caption"/>
+                                    <field name="status"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Enviadas" name="sent">
+                            <field name="outbox_ids" readonly="1">
+                                <list decoration-danger="status == 'dead' or current_status in ('failed', 'undelivered')"
+                                      decoration-success="current_status == 'read'">
+                                    <field name="create_date"/>
+                                    <field name="body"/>
+                                    <field name="status"/>
+                                    <field name="current_status"/>
+                                    <field name="error"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="dz23_conversation_view_search" model="ir.ui.view">
+        <field name="name">dz23.conversation.search</field>
+        <field name="model">dz23.conversation</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="phone"/>
+                <field name="name"/>
+                <field name="message_text_search" string="Texto das mensagens"/>
+                <field name="user_id"/>
+                <field name="team_id"/>
+                <field name="channel_id"/>
+                <filter name="mine" string="Minhas" domain="[('user_id', '=', uid)]"/>
+                <filter name="unassigned" string="Sem responsável" domain="[('user_id', '=', False)]"/>
+                <filter name="sla" string="SLA estourado" domain="[('sla_breached', '=', True)]"/>
+                <separator/>
+                <filter name="human" string="Atendimento humano" domain="[('state', '=', 'human_active')]"/>
+                <filter name="waiting" string="Aguardando"
+                        domain="[('state', 'in', ('waiting_customer', 'waiting_internal'))]"/>
+                <filter name="active_conversations" string="Em aberto"
+                        domain="[('state', 'not in', ('resolved', 'blocked'))]"/>
+                <filter name="blocked" string="Bloqueadas" domain="[('state', '=', 'blocked')]"/>
+                <filter name="opt_out" string="Opt-out" domain="[('opt_out', '=', True)]"/>
+                <group>
+                    <filter name="group_state" string="Estado" context="{'group_by': 'state'}"/>
+                    <filter name="group_user" string="Responsável" context="{'group_by': 'user_id'}"/>
+                    <filter name="group_team" string="Equipe" context="{'group_by': 'team_id'}"/>
+                    <filter name="group_channel" string="Canal" context="{'group_by': 'channel_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dz23_conversation_action" model="ir.actions.act_window">
+        <field name="name">Conversas</field>
+        <field name="res_model">dz23.conversation</field>
+        <field name="view_mode">kanban,list,form</field>
+        <field name="context">{'search_default_active_conversations': 1}</field>
+    </record>
+
+    <!-- Assistentes -->
+    <record id="dz23_conversation_reply_view_form" model="ir.ui.view">
+        <field name="name">dz23.conversation.reply.form</field>
+        <field name="model">dz23.conversation.reply</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="conversation_id" invisible="1"/>
+                <field name="channel_id" invisible="1"/>
+                <div class="alert alert-warning" role="alert" invisible="window_open">
+                    Janela de 24 h fechada: só é possível enviar um template aprovado.
+                </div>
+                <group>
+                    <field name="window_open" readonly="1"/>
+                    <field name="body" invisible="template_id" placeholder="Mensagem para o cliente…"/>
+                    <field name="template_id"/>
+                    <field name="template_params" invisible="not template_id" placeholder="Ana | 10:00"/>
+                </group>
+                <footer>
+                    <button name="action_send" type="object" string="Enviar" class="btn-primary"/>
+                    <button string="Cancelar" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="dz23_conversation_transfer_view_form" model="ir.ui.view">
+        <field name="name">dz23.conversation.transfer.form</field>
+        <field name="model">dz23.conversation.transfer</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="conversation_id" invisible="1"/>
+                <group>
+                    <field name="team_id"/>
+                    <field name="user_id"/>
+                    <field name="note" placeholder="Nota interna (não é enviada ao cliente)…"/>
+                </group>
+                <footer>
+                    <button name="action_transfer" type="object" string="Transferir" class="btn-primary"/>
+                    <button string="Cancelar" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <menuitem id="dz23_conversation_menu_root" name="Atendimento" sequence="6"
+              groups="dz23_whatsapp.group_dz23_attendant"/>
+    <menuitem id="dz23_conversation_menu" name="Conversas" parent="dz23_conversation_menu_root"
+              action="dz23_conversation_action" sequence="10"/>
+</odoo>

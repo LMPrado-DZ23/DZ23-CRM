@@ -25,7 +25,9 @@ grep -aE "Modules loaded|tests.result:" "$LOG" || true
 if ! grep -aq "Modules loaded" "$LOG"; then
   echo "FALHOU: módulos não carregaram (ver $LOG)"; exit 1
 fi
-if grep -aqE "[1-9][0-9]* failed|of [0-9]+ tests.* [1-9][0-9]* error" "$LOG"; then
-  echo "FALHOU: testes com falha (ver $LOG)"; exit 1
+# Gate POSITIVO: exige exatamente "0 failed, 0 error(s)". (O padrão antigo não
+# pegava "0 failed, 1 error(s)" e dava falso verde.)
+if ! grep -aqE "tests\.result: 0 failed, 0 error\(s\) of [1-9][0-9]* tests" "$LOG"; then
+  echo "FALHOU: testes com falha/erro (ver $LOG)"; exit 1
 fi
 echo "SMOKE OK: instalação limpa + testes dz23 verdes em $DB"
