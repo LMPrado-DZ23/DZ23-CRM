@@ -481,6 +481,29 @@ class DZ23ChannelAgent(models.Model):
             lead, txt, _("Oi! Já vi sua mensagem 😊 Me conta o que você precisa que eu te ajudo.")
         )
 
+    def _on_media_downloaded(self, media):
+        """Arquivo do cliente validado: anexa uma cópia ao lead do contato (o original
+        segue privado na mídia, sujeito à retenção)."""
+        self.ensure_one()
+        attachment = media.attachment_id
+        if not attachment:
+            return False
+        e164 = _e164_br(media.inbox_id.sender)
+        contact = (
+            self.env["dz23.channel.contact"]
+            .sudo()
+            .search([("channel_id", "=", self.id), ("provider_user_id", "=", e164)], limit=1)
+        )
+        lead = contact.lead_id
+        if not lead:
+            return False
+        copy = attachment.sudo().copy({"res_model": lead._name, "res_id": lead.id})
+        lead.sudo().message_post(
+            body=_("📎 Arquivo recebido pelo WhatsApp: %s") % media.filename,
+            attachment_ids=[copy.id],
+        )
+        return True
+
     def _handle_non_text(self, lead, number, message):
         """Mídia/localização/contato: registra no lead (nunca descarta em silêncio)
         e confirma o recebimento. Não envia nada à IA (imagem pode conter documento)."""

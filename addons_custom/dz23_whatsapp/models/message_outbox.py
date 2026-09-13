@@ -6,6 +6,7 @@
 # o lease vence e o item é reenviado (o cliente pode receber 2x) — registrado no
 # erro do item. O CICLO DE VIDA após o envio (delivered/read/failed) vem dos
 # callbacks de status via dz23.message.event, com transições monotônicas (ADR-006).
+import json
 import logging
 import time
 import uuid
@@ -14,7 +15,7 @@ from odoo import api, fields, models
 from odoo.tools.translate import _
 
 from .message_event import MESSAGE_STATUSES, STATUS_RANK
-from .provider_errors import ProviderError, ProviderTransientError
+from .provider_errors import ProviderError, ProviderPermanentError, ProviderTransientError
 from .queue_utils import (
     backoff_seconds,
     can_commit,
@@ -106,22 +107,41 @@ class DZ23MessageOutbox(models.Model):
     provider_error_code = fields.Char(readonly=True)
     provider_error_message = fields.Char(readonly=True)
     event_ids = fields.One2many("dz23.message.event", "outbox_id", readonly=True)
+    template_id = fields.Many2one("dz23.message.template", ondelete="restrict", readonly=True)
+    template_params = fields.Text(readonly=True, help="Variáveis do template (JSON).")
 
     # ---------- enfileirar ----------
     @api.model
-    def _enqueue(self, channel, recipient, body):
-        """Persiste a resposta a enviar. Retorna o record (ou vazio se sem corpo)."""
+    def _enqueue(self, channel, recipient, body, template=None, params=None):
+        """Persiste a mensagem a enviar (texto livre ou template aprovado)."""
+        if template:
+            body = body or template._render(params)
         if not body or not recipient:
             return self.browse()
-        return self.sudo().create(
-            {
-                "channel_id": channel.id,
-                "recipient": recipient,
-                "body": body,
-                "status": "pending",
-                "next_attempt_at": fields.Datetime.now(),
-            }
-        )
+        vals = {
+            "channel_id": channel.id,
+            "recipient": recipient,
+            "body": body,
+            "status": "pending",
+            "next_attempt_at": fields.Datetime.now(),
+        }
+        if template:
+            vals.update(
+                {
+                    "template_id": template.id,
+                    "template_params": json.dumps(
+                        [str(p) for p in (params or [])], ensure_ascii=False
+                    ),
+                }
+            )
+        return self.sudo().create(vals)
+
+    def _template_param_list(self):
+        try:
+            values = json.loads(self.template_params or "[]")
+        except ValueError:
+            values = []
+        return values if isinstance(values, list) else []
 
     # ---------- worker (cron) ----------
     @api.model
@@ -224,9 +244,23 @@ class DZ23MessageOutbox(models.Model):
         started = time.monotonic()
         try:
             with self.env.cr.savepoint():
-                data = self.channel_id._processing_self().send_text(
-                    self.recipient, self.body, correlation_id=self.correlation_id
-                )
+                channel = self.channel_id._processing_self()
+                if self.template_id:
+                    data = channel.send_template(
+                        self.recipient,
+                        self.template_id,
+                        self._template_param_list(),
+                        correlation_id=self.correlation_id,
+                    )
+                else:
+                    # Nunca contornar a política do provedor (ADR-009).
+                    if not channel._service_window_open(self.recipient):
+                        raise ProviderPermanentError(
+                            _("Fora da janela de 24 h do WhatsApp: use um template aprovado.")
+                        )
+                    data = channel.send_text(
+                        self.recipient, self.body, correlation_id=self.correlation_id
+                    )
             now = fields.Datetime.now()
             self.write(
                 {

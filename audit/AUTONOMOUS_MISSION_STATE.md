@@ -33,7 +33,10 @@ deps-container, odoo-tests) + PRs do dependabot sem falha. 20. 3 auditores: 0 CR
 | 0 Baseline | DONE | d170085 | smoke 41/41 |
 | CI verde (sast/odoo-tests/trivy) | TESTING (PR #6) | 0352ffe | local: smoke 41/41, bandit/semgrep/trivy limpos; aguardando CI do PR #6 |
 | 1 Ciclo de vida + P0 inbox/outbox | DONE (commit a seguir) | — | smoke 65/65 (dz23_smoke_1272); ruff/bandit limpos; bug real achado e corrigido: flush da recuperação de lease antes do claim SQL |
-| 3 Idempotência de efeitos (compra/agenda) | DONE (commit a seguir) | — | smoke 117/117 (dz23_smoke_737); bandit Linux limpo |
+| 3 Idempotência de efeitos (compra/agenda) | DONE | 5bdce7a | smoke 117/117; CI PR #6 todos os jobs verdes |
+| 4 Outbox robusta + filas lógicas | DONE | 8d4a23b | smoke 131/131; bandit Linux limpo; dev 19.0.11.0.0 |
+| 5 PIX Woovi | DONE | 0580496 | smoke 151/151; webhook RSA real em HttpCase; dev woovi 19.0.2.0.0 |
+| 6 Mídia e templates | TESTING | — | ADR-009; smoke 178/179 → bug real: attempts NULL no claim (COALESCE + default=0) |
 | 2 Normalização + webhooks Meta/Twilio/Evolution | DONE | 8570ceb | — | normalizadores puros + Twilio completo + 409 por canal + mídia registrada; CI PR #6: odoo-tests falhava por `set -o pipefail` em sh (corrigido com shell: bash); bandit: exclude `*/tests/*` corrigido (padrão antigo não casava) |
 | 3 Idempotência de efeitos (compra/agenda) | PENDING | — | — |
 | 4 Outbox robusta + filas lógicas | PENDING | — | — |

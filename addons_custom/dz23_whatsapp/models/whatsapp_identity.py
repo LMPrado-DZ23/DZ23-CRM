@@ -18,6 +18,12 @@ class DZ23ChannelContact(models.Model):
     )
     phone_e164 = fields.Char(index=True)
     partner_id = fields.Many2one("res.partner", check_company=True, index=True)
+    last_inbound_at = fields.Datetime(
+        "Última mensagem do cliente",
+        readonly=True,
+        index=True,
+        help="Abre a janela de atendimento de 24 h dos provedores oficiais (ADR-009).",
+    )
     # lead_id é adicionado por dz23_agent (que depende de crm) via _inherit.
 
     _provider_user_uniq = models.Constraint(
@@ -40,3 +46,17 @@ class DZ23ChannelContact(models.Model):
                 "phone_e164": phone_e164 or provider_user_id,
             }
         )
+
+    @api.model
+    def _touch_inbound(self, channel, number, when=None):
+        """Registra a última mensagem recebida do cliente (janela de 24 h)."""
+        from .whatsapp_channel import _e164_br
+
+        e164 = _e164_br(number)
+        if not e164:
+            return self.browse()
+        contact = self.sudo()._get_or_create(channel, e164, e164)
+        when = when or fields.Datetime.now()
+        if not contact.last_inbound_at or when > contact.last_inbound_at:
+            contact.last_inbound_at = when
+        return contact

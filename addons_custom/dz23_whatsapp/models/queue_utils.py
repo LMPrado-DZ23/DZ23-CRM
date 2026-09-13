@@ -82,7 +82,7 @@ def claim_due(
             """
             UPDATE %(table)s AS target
                SET status = %(to_state)s,
-                   attempts = target.attempts + 1,
+                   attempts = COALESCE(target.attempts, 0) + 1,
                    lease_until = %(now)s + %(lease)s * interval '1 second'
              WHERE target.id IN (
                    SELECT id FROM %(table)s

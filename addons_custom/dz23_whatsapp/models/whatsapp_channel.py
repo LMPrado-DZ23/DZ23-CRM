@@ -2,15 +2,20 @@
 # (company_id) e carrega as PRÓPRIAS credenciais + prompt do agente — nada de
 # ir.config_parameter global. O webhook resolve o canal por um token opaco e
 # autentica por canal. Todo o processamento roda no escopo da empresa do canal.
+import base64
+import binascii
+import json
 import logging
 import re
 import secrets
+from datetime import timedelta
 
 import requests
 from odoo import api, fields, models
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.translate import _
 
+from .media_utils import MediaRejectedError, is_allowed_download_url
 from .provider_errors import (
     ProviderPermanentError,
     ProviderTransientError,
@@ -20,6 +25,8 @@ from .provider_normalizers import validate_event
 
 _logger = logging.getLogger(__name__)
 _TIMEOUT = 15
+_SERVICE_WINDOW = timedelta(hours=24)
+_MEDIA_ID_RE = re.compile(r"^[\w.\-]+$")
 
 
 def _digits(v):
@@ -140,6 +147,9 @@ class DZ23Channel(models.Model):
     meta_api_version = fields.Char("Meta API version", default="v20.0")
     meta_app_secret = fields.Char("Meta App Secret", groups="base.group_system")
     meta_verify_token = fields.Char("Meta verify token", groups="base.group_system")
+    meta_waba_id = fields.Char(
+        "Meta WABA id", help="Conta WhatsApp Business: usada para sincronizar templates."
+    )
     # Twilio
     twilio_sid = fields.Char("Twilio SID")
     twilio_token = fields.Char("Twilio token", groups="base.group_system")
@@ -469,6 +479,202 @@ class DZ23Channel(models.Model):
         if not data.get("sid"):
             raise ProviderTransientError(_("Twilio não confirmou o envio (sem SID)."))
         return data
+
+    # ---------- janela de atendimento e templates (ADR-009) ----------
+    def _service_window_open(self, recipient):
+        """Meta/Twilio só aceitam texto livre até 24 h após a última mensagem do
+        cliente. Evolution (não oficial) não tem janela."""
+        self.ensure_one()
+        if self.provider not in ("meta_cloud", "twilio"):
+            return True
+        contact = (
+            self.env["dz23.channel.contact"]
+            .sudo()
+            .search(
+                [("channel_id", "=", self.id), ("provider_user_id", "=", _e164_br(recipient))],
+                limit=1,
+            )
+        )
+        last = contact.last_inbound_at
+        return bool(last and fields.Datetime.now() - last <= _SERVICE_WINDOW)
+
+    def send_template(self, number, template, params=None, correlation_id=None):
+        """Envia um template APROVADO (fora da janela de 24 h)."""
+        self.ensure_one()
+        to = _e164_br(number)
+        if not to:
+            raise ProviderPermanentError(_("Número de WhatsApp inválido."))
+        template = template.sudo()
+        if template.channel_id != self:
+            raise ProviderPermanentError(_("O template pertence a outro canal."))
+        params = [str(p) for p in (params or [])]
+        template._check_sendable(params)
+        channel = self.sudo()
+        if channel.provider == "meta_cloud":
+            return channel._send_template_meta(to, template, params, correlation_id)
+        if channel.provider == "twilio":
+            return channel._send_template_twilio(to, template, params)
+        return channel._send_evolution(to, template._render(params))
+
+    def _send_template_meta(self, to, template, params, correlation_id=None):
+        if not (self.meta_token and self.meta_phone_id):
+            raise ProviderPermanentError(_("Canal Meta incompleto (token/phone_id)."))
+        url = "https://graph.facebook.com/%s/%s/messages" % (
+            self.meta_api_version or "v20.0",
+            self.meta_phone_id,
+        )
+        body = {"name": template.name, "language": {"code": template.language_code}}
+        if params:
+            body["components"] = [
+                {"type": "body", "parameters": [{"type": "text", "text": p} for p in params]}
+            ]
+        payload = {"messaging_product": "whatsapp", "to": to, "type": "template", "template": body}
+        if correlation_id:
+            payload["biz_opaque_callback_data"] = correlation_id
+        data = self._post(
+            url, headers={"Authorization": "Bearer %s" % self.meta_token}, json=payload
+        )
+        if not (data.get("messages") or [{}])[0].get("id"):
+            raise ProviderTransientError(_("Meta não confirmou o envio (sem id de mensagem)."))
+        return data
+
+    def _send_template_twilio(self, to, template, params):
+        if not (self.twilio_sid and self.twilio_token and self.twilio_from):
+            raise ProviderPermanentError(_("Canal Twilio incompleto (sid/token/from)."))
+        if not template.provider_template_id:
+            raise ProviderPermanentError(_("Template Twilio sem ContentSid."))
+        frm = (
+            self.twilio_from
+            if self.twilio_from.startswith("whatsapp:")
+            else "whatsapp:%s" % self.twilio_from
+        )
+        data = self._post(
+            "https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json" % self.twilio_sid,
+            data={
+                "From": frm,
+                "To": "whatsapp:+%s" % to,
+                "ContentSid": template.provider_template_id,
+                "ContentVariables": json.dumps({str(i + 1): p for i, p in enumerate(params)}),
+                "StatusCallback": self._public_webhook_url("twilio"),
+            },
+            auth=(self.twilio_sid, self.twilio_token),
+        )
+        if not data.get("sid"):
+            raise ProviderTransientError(_("Twilio não confirmou o envio (sem SID)."))
+        return data
+
+    def action_sync_templates(self):
+        self.ensure_one()
+        count = self.env["dz23.message.template"]._sync_meta(self)
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Templates"),
+                "message": _("%s template(s) sincronizado(s).") % count,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    # ---------- mídia recebida (ADR-009) ----------
+    def _media_fetch(self, media, max_bytes):
+        """Baixa os bytes da mídia. Retorna (bytes, mime declarado, sha256 esperado)."""
+        self.ensure_one()
+        channel = self.sudo()
+        fetch = {
+            "meta_cloud": channel._media_fetch_meta,
+            "evolution": channel._media_fetch_evolution,
+            "twilio": channel._media_fetch_twilio,
+        }[channel.provider]
+        return fetch(media, max_bytes)
+
+    def _download(self, url, max_bytes, **kwargs):
+        """GET em streaming com teto de tamanho, só para hosts permitidos (anti-SSRF)."""
+        if not is_allowed_download_url(url):
+            raise MediaRejectedError("URL de mídia fora da lista de hosts permitidos")
+        try:
+            resp = requests.get(url, timeout=_TIMEOUT, stream=True, **kwargs)
+        except requests.exceptions.RequestException as e:
+            raise ProviderTransientError(
+                _("Falha de rede ao baixar mídia (%s).") % type(e).__name__
+            ) from None
+        try:
+            if resp.status_code >= 400:
+                raise classify_http_error(resp.status_code, resp.headers, {})
+            if int(resp.headers.get("Content-Length") or 0) > max_bytes:
+                raise MediaRejectedError("arquivo maior que o limite")
+            chunks, total = [], 0
+            for chunk in resp.iter_content(chunk_size=65536):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise MediaRejectedError("arquivo maior que o limite")
+                chunks.append(chunk)
+            return b"".join(chunks), resp.headers.get("Content-Type", "")
+        finally:
+            resp.close()
+
+    def _media_fetch_meta(self, media, max_bytes):
+        if not (self.meta_token and media.media_id):
+            raise ProviderPermanentError(_("Mídia Meta sem token/media_id."))
+        if not _MEDIA_ID_RE.match(media.media_id):
+            raise MediaRejectedError("media_id inválido")
+        headers = {"Authorization": "Bearer %s" % self.meta_token}
+        info_url = "https://graph.facebook.com/%s/%s" % (
+            self.meta_api_version or "v20.0",
+            media.media_id,
+        )
+        try:
+            resp = requests.get(info_url, headers=headers, timeout=_TIMEOUT)
+        except requests.exceptions.RequestException as e:
+            raise ProviderTransientError(
+                _("Falha de rede ao consultar mídia (%s).") % type(e).__name__
+            ) from None
+        try:
+            info = resp.json()
+        except ValueError:
+            info = {}
+        if resp.status_code >= 400:
+            raise classify_http_error(resp.status_code, resp.headers, info)
+        if int(info.get("file_size") or 0) > max_bytes:
+            raise MediaRejectedError("arquivo maior que o limite")
+        data, content_type = self._download(info.get("url"), max_bytes, headers=headers)
+        return data, info.get("mime_type") or content_type, info.get("sha256")
+
+    def _media_fetch_evolution(self, media, max_bytes):
+        if not (self.evo_base and self.evo_instance and self.evo_apikey):
+            raise ProviderPermanentError(_("Canal Evolution incompleto (base/instância/apikey)."))
+        url = "%s/chat/getBase64FromMediaMessage/%s" % (
+            self.evo_base.rstrip("/"),
+            self.evo_instance,
+        )
+        data = self._post(
+            url,
+            headers={"apikey": self.evo_apikey},
+            json={"message": {"key": {"id": media.provider_message_id}}, "convertToMp4": False},
+        )
+        encoded = str(data.get("base64") or "")
+        if not encoded:
+            raise ProviderTransientError(_("Evolution não devolveu o arquivo."))
+        if len(encoded) > (max_bytes * 4) // 3 + 16:
+            raise MediaRejectedError("arquivo maior que o limite")
+        try:
+            raw = base64.b64decode(encoded.split(",")[-1], validate=True)
+        except (binascii.Error, ValueError):
+            raise MediaRejectedError("arquivo em base64 inválido") from None
+        return raw, data.get("mimetype"), None
+
+    def _media_fetch_twilio(self, media, max_bytes):
+        if not (self.twilio_sid and self.twilio_token and media.media_id):
+            raise ProviderPermanentError(_("Mídia Twilio sem credenciais/URL."))
+        data, content_type = self._download(
+            media.media_id, max_bytes, auth=(self.twilio_sid, self.twilio_token)
+        )
+        return data, content_type, None
+
+    def _on_media_downloaded(self, media):
+        """Gancho pós-download (o dz23_agent anexa o arquivo ao lead)."""
+        return False
 
     # ---------- inbound (base: só registra; dz23_agent sobrescreve) ----------
     def handle_inbound(self, number, text, raw=None, message=None):

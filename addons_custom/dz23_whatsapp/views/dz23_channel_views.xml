@@ -43,6 +43,10 @@
                                 <field name="meta_api_version"/>
                                 <field name="meta_app_secret" password="True"/>
                                 <field name="meta_verify_token"/>
+                                <field name="meta_waba_id"/>
+                                <button name="action_sync_templates" type="object"
+                                        string="Sincronizar templates" class="btn-secondary"
+                                        icon="fa-refresh" invisible="not meta_waba_id"/>
                             </group>
                         </page>
                         <page string="Twilio" invisible="provider != 'twilio'">

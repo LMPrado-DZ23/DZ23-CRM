@@ -56,6 +56,9 @@ class TestProviderErrors(TransactionCase):
             }
         )
         self.Outbox = self.env["dz23.message.outbox"]
+        # Aqui se testa a classificação de erros do provedor, não a janela de 24 h
+        # (coberta em test_templates_window): considera a janela aberta.
+        self.patch(type(self.env["dz23.channel"]), "_service_window_open", lambda *a, **k: True)
 
     # ----- classificação -----
     def test_classification(self):

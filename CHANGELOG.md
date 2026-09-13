@@ -5,6 +5,20 @@ Este projeto usa versionamento por módulo (Odoo `19.0.x.y.z`).
 
 ## [Não lançado]
 
+### Fase 6 — Mídia e templates oficiais (`dz23_whatsapp` 19.0.12.0.0)
+- **Mídia recebida** (`dz23.message.media`, ADR-009): worker de download próprio por
+  provedor (Meta em 2 etapas, Evolution base64, Twilio com basic auth), **MIME real
+  pelo conteúdo**, extensões/MIME perigosos bloqueados (executáveis, scripts, HTML,
+  SVG), limite de tamanho em streaming, **sha256** conferido, **allowlist anti-SSRF**
+  e validação de `media_id` contra path injection.
+- Anexo **privado** da empresa do canal; cópia vai para o chatter do lead; retenção
+  configurável remove arquivos vencidos (`dz23.whatsapp.media_retention_days`).
+- **Templates oficiais** (`dz23.message.template`): cadastro por canal, variáveis,
+  status, sincronização da Meta (`meta_waba_id`); envio Meta (components), Twilio
+  (`ContentSid`/`ContentVariables`) e Evolution (texto renderizado).
+- **Janela de 24 h**: `last_inbound_at` por contato; texto livre fora da janela em
+  Meta/Twilio vai para a DLQ como erro permanente — só template aprovado sai.
+
 ### Fase 5 — PIX Woovi robusto (`dz23_payment_woovi` 19.0.2.0.0)
 - **Cobrança idempotente**: criada uma única vez por transação (lock de linha + id
   persistido) e **reutilizada ao recarregar a página**; `correlationID` = referência;

@@ -119,7 +119,7 @@ class DZ23MessageInbox(models.Model):
         ref = {k: event.get(k) for k in ("media", "location", "contacts") if event.get(k)}
         if ref:
             extra["media_ref"] = payload_json(ref)
-        return self._enqueue(
+        rec, created = self._enqueue(
             channel,
             str(event["provider_message_id"]),
             event.get("sender"),
@@ -127,6 +127,13 @@ class DZ23MessageInbox(models.Model):
             event.get("payload"),
             extra=extra,
         )
+        if created:
+            # Janela de 24 h (a hora da mensagem, não a do webhook) e download da mídia.
+            self.env["dz23.channel.contact"].sudo()._touch_inbound(
+                channel, event.get("sender"), event.get("occurred_at")
+            )
+            self.env["dz23.message.media"].sudo()._enqueue_from_event(rec, event)
+        return rec, created
 
     @api.model
     def _enqueue(self, channel, message_id, sender, text, payload_dict, extra=None):
